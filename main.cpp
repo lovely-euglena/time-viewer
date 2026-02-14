@@ -426,7 +426,26 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) 
     }
 
     case WM_GETMINMAXINFO: {
-        // 限制窗口最小大小
+        LPMINMAXINFO lpMMI = (LPMINMAXINFO)lParam;
+
+        // 获取系统信息
+        HDC hdc = GetDC(hWnd);
+        HFONT hOldFont = (HFONT)SelectObject(hdc, hLargeFont);
+
+        // 计算时间文字所需的最小尺寸
+        SIZE textSize;
+        GetTextExtentPoint32W(hdc, L"00:00:00", 8, &textSize);
+
+        SelectObject(hdc, hOldFont);
+        ReleaseDC(hWnd, hdc);
+
+        // 计算最小窗口大小：时间文字宽度 + 边距，高度考虑按钮位置
+        int minWidth = max(textSize.cx + 100, 500);  // 至少500，或者文字宽度+100
+        int minHeight = 400;  // 固定最小高度，确保能显示按钮
+
+        lpMMI->ptMinTrackSize.x = minWidth;
+        lpMMI->ptMinTrackSize.y = minHeight;
+
         HandleGetMinMaxInfo(lParam);
         break;
     }

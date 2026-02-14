@@ -135,19 +135,23 @@ bool HandleNcLButtonDblClk(HWND hWnd, WPARAM wParam)
     return false;
 }
 
-/**
- * 处理WM_GETMINMAXINFO消息以限制窗口最小大小
- * 在全屏状态下防止窗口被最小化到异常尺寸
- * @param lParam: MINMAXINFO结构指针
- */
+
+ /**
+  * 处理WM_GETMINMAXINFO消息以限制窗口最小大小
+  * @param lParam: MINMAXINFO结构指针
+  */
 void HandleGetMinMaxInfo(LPARAM lParam)
 {
     LPMINMAXINFO lpMMI = (LPMINMAXINFO)lParam;
+
+    // 设置最小跟踪大小，避免窗口过小
+    lpMMI->ptMinTrackSize.x = 500;  // 最小宽度
+    lpMMI->ptMinTrackSize.y = 400;  // 最小高度
+
     if (g_bFullscreen)
     {
-        // 设置最小跟踪大小，避免窗口过小
-        lpMMI->ptMinTrackSize.x = 200;
-        lpMMI->ptMinTrackSize.y = 150;
+        // 全屏状态下可以设置更小的限制（但实际上全屏时不会用到）
+        // 这里保持和普通窗口一致或更小
     }
 }
 
