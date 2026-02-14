@@ -49,15 +49,30 @@ std::wstring GetTimeDateString() {
 
 // 创建控件函数
 void CreateControls(HWND hWnd) {
+    // 获取客户区大小
+    RECT clientRect;
+    GetClientRect(hWnd, &clientRect);
+
+    // 按钮尺寸
+    int btnWidth = 120;
+    int btnHeight = 40;
+
+    // 计算底部位置（距离底部20像素）
+    int btnY = clientRect.bottom - btnHeight - 20;
+
+    // 计算水平居中位置
+    int totalWidth = btnWidth * 2 + 30; // 两个按钮宽度 + 间距
+    int startX = (clientRect.right - totalWidth) / 2;
+
     // 创建全屏切换按钮
     hFullscreenBtn = CreateWindowW(
         L"BUTTON",                         // 按钮类
         L"全屏 (F11)",                     // 按钮文本
         WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_PUSHBUTTON | BS_FLAT, // 样式
-        20, 320,                           // 位置 x, y
-        120, 40,                           // 宽度, 高度
-        hWnd,                              // 父窗口
-        (HMENU)1001,                       // 控件ID
+        startX, btnY,                       // 位置 x, y
+        btnWidth, btnHeight,                 // 宽度, 高度
+        hWnd,                               // 父窗口
+        (HMENU)1001,                        // 控件ID
         (HINSTANCE)GetWindowLongPtr(hWnd, GWLP_HINSTANCE),
         NULL
     );
@@ -67,10 +82,10 @@ void CreateControls(HWND hWnd) {
         L"BUTTON",                         // 按钮类
         L"退出 (Esc)",                     // 按钮文本
         WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_PUSHBUTTON | BS_FLAT,
-        170, 320,                          // 位置 x, y
-        120, 40,                           // 宽度, 高度
-        hWnd,                              // 父窗口
-        (HMENU)1002,                       // 控件ID
+        startX + btnWidth + 30, btnY,       // 位置 x, y
+        btnWidth, btnHeight,                 // 宽度, 高度
+        hWnd,                               // 父窗口
+        (HMENU)1002,                        // 控件ID
         (HINSTANCE)GetWindowLongPtr(hWnd, GWLP_HINSTANCE),
         NULL
     );
@@ -344,6 +359,26 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) 
     case WM_SIZE: {
         // 窗口大小改变时重绘
         InvalidateRect(hWnd, NULL, TRUE);
+
+        // 更新按钮位置（当窗口大小改变时）
+        if (hFullscreenBtn && hExitBtn) {
+            RECT clientRect;
+            GetClientRect(hWnd, &clientRect);
+
+            int btnWidth = 120;
+            int btnHeight = 40;
+            int btnY = clientRect.bottom - btnHeight - 20;
+            int totalWidth = btnWidth * 2 + 30;
+            int startX = (clientRect.right - totalWidth) / 2;
+
+            SetWindowPos(hFullscreenBtn, NULL,
+                startX, btnY, btnWidth, btnHeight,
+                SWP_NOZORDER);
+
+            SetWindowPos(hExitBtn, NULL,
+                startX + btnWidth + 30, btnY, btnWidth, btnHeight,
+                SWP_NOZORDER);
+        }
         break;
     }
 
