@@ -2,6 +2,7 @@
 // 全屏切换功能模块实现文件
 // 提供F11快捷键和标题栏双击切换全屏功能，支持任务栏保留的非独占全屏模式
 
+#include "fullscreen.h"
 #include <windows.h>
 #include <winuser.h>
 

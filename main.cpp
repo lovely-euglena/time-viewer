@@ -11,7 +11,7 @@
 #pragma comment(lib, "comctl32.lib")
 
 // 包含全屏模块
-#include "fullscreen.cpp"
+#include "fullscreen.h"
 
 // 窗口过程函数声明
 LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam);
