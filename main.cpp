@@ -220,6 +220,8 @@ int WINAPI wWinMain(_In_ HINSTANCE hInstance,
     wcex.lpszClassName = CLASS_NAME;
     wcex.hIcon = LoadIcon(hInstance, IDI_APPLICATION);
     wcex.hIconSm = LoadIcon(hInstance, IDI_APPLICATION);
+    wcex.hIcon = LoadIconW(hInstance, MAKEINTRESOURCE(101));  // 大图标
+    wcex.hIconSm = LoadIconW(hInstance, MAKEINTRESOURCE(101)); // 小图标（任务栏）
 
     if (!RegisterClassExW(&wcex)) {
         MessageBoxW(nullptr, L"窗口类注册失败！", L"错误", MB_ICONERROR);
