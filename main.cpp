@@ -282,13 +282,6 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) 
         PAINTSTRUCT ps;
         HDC hdc = BeginPaint(hWnd, &ps);
 
-        // 使用大字体绘制时间文本
-        HGDIOBJ hOldFont = SelectObject(hdc, hLargeFont);
-
-        // 设置文本颜色（亮色）和背景模式
-        SetTextColor(hdc, RGB(220, 220, 255)); // 浅蓝色文字
-        SetBkMode(hdc, TRANSPARENT);
-
         // 获取客户区大小
         RECT clientRect;
         GetClientRect(hWnd, &clientRect);
@@ -304,19 +297,25 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) 
         std::wstring dateStr = timeDateStr.substr(firstNewLine + 1, secondNewLine - firstNewLine - 1);
         std::wstring weekStr = timeDateStr.substr(secondNewLine + 1);
 
-        // 绘制时间（大号）
+        // 计算垂直居中位置（整体紧凑布局）
+        int totalHeight = 250; // 时间 + 日期 + 星期的总高度（紧凑）
+        int startY = (clientRect.bottom - clientRect.top - totalHeight) / 2 - 40; // 稍微上移，给按钮留空间
+
+        // 绘制时间（大号，紧凑）
         RECT timeRect = clientRect;
-        timeRect.top = 100;
-        timeRect.bottom = 300;
+        timeRect.top = startY;
+        timeRect.bottom = startY + 140; // 时间区域高度
+
+        HGDIOBJ hOldFont = SelectObject(hdc, hLargeFont);
+        SetTextColor(hdc, RGB(220, 220, 255));
+        SetBkMode(hdc, TRANSPARENT);
+
         DrawTextW(hdc, timeStr.c_str(), -1, &timeRect,
             DT_CENTER | DT_VCENTER | DT_NOPREFIX | DT_SINGLELINE);
 
-        // 恢复原始字体
-        SelectObject(hdc, hOldFont);
-
-        // 创建中等字体用于日期
+        // 创建稍小字体用于日期
         HFONT hDateFont = CreateFontW(
-            -36,                            // 字体高度
+            -28,                            // 字体高度（比之前小）
             0,                              // 字符平均宽度
             0,                              // 角度偏移
             0,                              // 基线到基线距离
@@ -332,25 +331,29 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) 
             L"Segoe UI"                     // 字体名称
         );
 
+        // 绘制日期（紧凑）
+        RECT dateRect = clientRect;
+        dateRect.top = startY + 150;  // 时间下方留小间距
+        dateRect.bottom = startY + 185;
+
         HGDIOBJ hOldDateFont = SelectObject(hdc, hDateFont);
         SetTextColor(hdc, RGB(200, 200, 240));
 
-        // 绘制日期
-        RECT dateRect = clientRect;
-        dateRect.top = 320;
-        dateRect.bottom = 380;
         DrawTextW(hdc, dateStr.c_str(), -1, &dateRect,
             DT_CENTER | DT_VCENTER | DT_NOPREFIX | DT_SINGLELINE);
 
-        // 绘制星期
+        // 绘制星期（和日期一样大）
         RECT weekRect = clientRect;
-        weekRect.top = 380;
-        weekRect.bottom = 440;
+        weekRect.top = startY + 190;  // 日期下方留小间距
+        weekRect.bottom = startY + 225;
+
+        SetTextColor(hdc, RGB(180, 180, 220));
         DrawTextW(hdc, weekStr.c_str(), -1, &weekRect,
             DT_CENTER | DT_VCENTER | DT_NOPREFIX | DT_SINGLELINE);
 
         SelectObject(hdc, hOldDateFont);
         DeleteObject(hDateFont);
+        SelectObject(hdc, hOldFont);
 
         EndPaint(hWnd, &ps);
         break;
