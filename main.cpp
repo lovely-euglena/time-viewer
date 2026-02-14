@@ -96,13 +96,17 @@ void HandleTouchInput(HWND hWnd, WPARAM wParam, LPARAM lParam) {
                 ptInput.y = TOUCH_COORD_TO_PIXEL(ti.y);
                 ScreenToClient(hWnd, &ptInput);
 
-                // 检测双击手势（简化实现）
+                // 检测双击手势（使用64位时间戳避免溢出）
                 if (ti.dwFlags & TOUCHEVENTF_DOWN) {
-                    static DWORD lastTouchTime = 0;
+                    // 使用 ULONGLONG (64位) 代替 DWORD (32位)
+                    static ULONGLONG lastTouchTime = 0;
                     static POINT lastTouchPoint = { 0, 0 };
-                    DWORD currentTime = GetTickCount();
+
+                    // 使用 GetTickCount64() 替代 GetTickCount()
+                    ULONGLONG currentTime = GetTickCount64();
                     POINT currentPoint = ptInput;
 
+                    // 注意：这里的时间差计算现在是64位，不会溢出
                     if ((currentTime - lastTouchTime) < 500 && // 500ms内
                         abs(currentPoint.x - lastTouchPoint.x) < 50 &&
                         abs(currentPoint.y - lastTouchPoint.y) < 50) {

@@ -227,7 +227,7 @@ private:
         int min_rtt = INT_MAX;
 
         for (const auto& server : servers) {
-            if (server.status == SERVER_ACTIVE && server.responseTime < min_rtt) {
+            if (server.status == SERVER_ACTIVE && (int)server.responseTime < min_rtt) {
                 min_rtt = server.responseTime;
                 best_server = server.serverName;
             }
