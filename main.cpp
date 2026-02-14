@@ -1,6 +1,5 @@
 ﻿// main.cpp
 // Windows 11风格时间显示主程序
-// 支持触控交互、定时刷新和全屏切换功能
 
 #include <windows.h>
 #include <dwmapi.h>
@@ -10,7 +9,7 @@
 #pragma comment(lib, "dwmapi.lib")
 #pragma comment(lib, "comctl32.lib")
 
-// 包含全屏模块
+// 包含全屏模块头文件
 #include "fullscreen.h"
 
 // 窗口过程函数声明
@@ -18,23 +17,30 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam);
 
 // 全局变量
 HFONT hLargeFont = nullptr;     // 大字体用于时间显示
-HFONT hNormalFont = nullptr;    // 正常字体用于按钮
+HFONT hDateFont = nullptr;      // 日期字体
+HFONT hNormalFont = nullptr;    // 按钮字体
 HWND hMainWindow = nullptr;     // 主窗口句柄
 HWND hFullscreenBtn = nullptr;  // 全屏按钮句柄
 HWND hExitBtn = nullptr;        // 退出按钮句柄
 
-// 时间格式化函数
+// ==================== 函数声明 ====================
+std::wstring GetTimeDateString();
+void CreateControls(HWND hWnd);
+void HandleTouchInput(HWND hWnd, WPARAM wParam, LPARAM lParam);
+void CreateDynamicFonts(HWND hWnd);  // 👈 新增：动态字体创建函数声明
+
+// ==================== 函数实现 ====================
+
+// 1. 时间格式化函数
 std::wstring GetTimeDateString() {
     SYSTEMTIME st;
     GetLocalTime(&st);
 
-    // 格式: HH:mm:ss\nYYYY-MM-DD
     wchar_t timeStr[64];
     wsprintfW(timeStr, L"%02d:%02d:%02d\n%04d-%02d-%02d",
         st.wHour, st.wMinute, st.wSecond,
         st.wYear, st.wMonth, st.wDay);
 
-    // 添加星期信息
     const wchar_t* weekdays[] = {
         L"星期日", L"星期一", L"星期二", L"星期三",
         L"星期四", L"星期五", L"星期六"
@@ -47,57 +53,108 @@ std::wstring GetTimeDateString() {
     return result;
 }
 
-// 创建控件函数
-void CreateControls(HWND hWnd) {
+// 2. 👈 新增：动态字体创建函数（放在这里）
+void CreateDynamicFonts(HWND hWnd) {
     // 获取客户区大小
     RECT clientRect;
     GetClientRect(hWnd, &clientRect);
 
-    // 按钮尺寸
+    // 计算字体大小：时间字体为窗口高度的 1/5，日期字体为窗口高度的 1/12
+    int windowHeight = clientRect.bottom - clientRect.top;
+    int timeFontSize = max(36, min(120, windowHeight / 5));  // 范围 36-120
+    int dateFontSize = max(16, min(48, windowHeight / 12));  // 范围 16-48
+
+    // 删除旧字体
+    if (hLargeFont) {
+        DeleteObject(hLargeFont);
+        hLargeFont = nullptr;
+    }
+    if (hDateFont) {
+        DeleteObject(hDateFont);
+        hDateFont = nullptr;
+    }
+
+    // 创建新的大字体（时间）
+    hLargeFont = CreateFontW(
+        -timeFontSize,                   // 动态字体高度
+        0, 0, 0, FW_SEMIBOLD,
+        FALSE, FALSE, FALSE,
+        DEFAULT_CHARSET,
+        OUT_DEFAULT_PRECIS,
+        CLIP_DEFAULT_PRECIS,
+        CLEARTYPE_QUALITY,
+        DEFAULT_PITCH,
+        L"Segoe UI"
+    );
+
+    // 创建新的日期字体
+    hDateFont = CreateFontW(
+        -dateFontSize,                    // 动态字体高度
+        0, 0, 0, FW_NORMAL,
+        FALSE, FALSE, FALSE,
+        DEFAULT_CHARSET,
+        OUT_DEFAULT_PRECIS,
+        CLIP_DEFAULT_PRECIS,
+        CLEARTYPE_QUALITY,
+        DEFAULT_PITCH,
+        L"Segoe UI"
+    );
+
+    // 按钮字体保持固定大小
+    if (!hNormalFont) {
+        hNormalFont = CreateFontW(
+            -14, 0, 0, 0, FW_NORMAL,
+            FALSE, FALSE, FALSE,
+            DEFAULT_CHARSET,
+            OUT_DEFAULT_PRECIS,
+            CLIP_DEFAULT_PRECIS,
+            CLEARTYPE_QUALITY,
+            DEFAULT_PITCH,
+            L"Segoe UI"
+        );
+    }
+
+    // 更新按钮字体
+    if (hFullscreenBtn && hExitBtn && hNormalFont) {
+        SendMessageW(hFullscreenBtn, WM_SETFONT, (WPARAM)hNormalFont, TRUE);
+        SendMessageW(hExitBtn, WM_SETFONT, (WPARAM)hNormalFont, TRUE);
+    }
+}
+
+// 3. 创建控件函数
+void CreateControls(HWND hWnd) {
+    RECT clientRect;
+    GetClientRect(hWnd, &clientRect);
+
     int btnWidth = 120;
     int btnHeight = 40;
-
-    // 计算底部位置（距离底部20像素）
     int btnY = clientRect.bottom - btnHeight - 20;
-
-    // 计算水平居中位置
-    int totalWidth = btnWidth * 2 + 30; // 两个按钮宽度 + 间距
+    int totalWidth = btnWidth * 2 + 30;
     int startX = (clientRect.right - totalWidth) / 2;
 
-    // 创建全屏切换按钮
     hFullscreenBtn = CreateWindowW(
-        L"BUTTON",                         // 按钮类
-        L"全屏 (F11)",                     // 按钮文本
-        WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_PUSHBUTTON | BS_FLAT, // 样式
-        startX, btnY,                       // 位置 x, y
-        btnWidth, btnHeight,                 // 宽度, 高度
-        hWnd,                               // 父窗口
-        (HMENU)1001,                        // 控件ID
-        (HINSTANCE)GetWindowLongPtr(hWnd, GWLP_HINSTANCE),
-        NULL
-    );
-
-    // 创建退出按钮
-    hExitBtn = CreateWindowW(
-        L"BUTTON",                         // 按钮类
-        L"退出 (Esc)",                     // 按钮文本
+        L"BUTTON", L"全屏 (F11)",
         WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_PUSHBUTTON | BS_FLAT,
-        startX + btnWidth + 30, btnY,       // 位置 x, y
-        btnWidth, btnHeight,                 // 宽度, 高度
-        hWnd,                               // 父窗口
-        (HMENU)1002,                        // 控件ID
-        (HINSTANCE)GetWindowLongPtr(hWnd, GWLP_HINSTANCE),
-        NULL
+        startX, btnY, btnWidth, btnHeight,
+        hWnd, (HMENU)1001,
+        (HINSTANCE)GetWindowLongPtr(hWnd, GWLP_HINSTANCE), NULL
     );
 
-    // 设置按钮字体
+    hExitBtn = CreateWindowW(
+        L"BUTTON", L"退出 (Esc)",
+        WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_PUSHBUTTON | BS_FLAT,
+        startX + btnWidth + 30, btnY, btnWidth, btnHeight,
+        hWnd, (HMENU)1002,
+        (HINSTANCE)GetWindowLongPtr(hWnd, GWLP_HINSTANCE), NULL
+    );
+
     if (hNormalFont && hFullscreenBtn && hExitBtn) {
         SendMessageW(hFullscreenBtn, WM_SETFONT, (WPARAM)hNormalFont, TRUE);
         SendMessageW(hExitBtn, WM_SETFONT, (WPARAM)hNormalFont, TRUE);
     }
 }
 
-// 触摸输入处理函数
+// 4. 触摸输入处理函数
 void HandleTouchInput(HWND hWnd, WPARAM wParam, LPARAM lParam) {
     UINT cInputs = LOWORD(wParam);
     PTOUCHINPUT pInputs = new TOUCHINPUT[cInputs];
@@ -111,23 +168,17 @@ void HandleTouchInput(HWND hWnd, WPARAM wParam, LPARAM lParam) {
                 ptInput.y = TOUCH_COORD_TO_PIXEL(ti.y);
                 ScreenToClient(hWnd, &ptInput);
 
-                // 检测双击手势（使用64位时间戳避免溢出）
                 if (ti.dwFlags & TOUCHEVENTF_DOWN) {
-                    // 使用 ULONGLONG (64位) 代替 DWORD (32位)
                     static ULONGLONG lastTouchTime = 0;
                     static POINT lastTouchPoint = { 0, 0 };
 
-                    // 使用 GetTickCount64() 替代 GetTickCount()
                     ULONGLONG currentTime = GetTickCount64();
                     POINT currentPoint = ptInput;
 
-                    // 注意：这里的时间差计算现在是64位，不会溢出
-                    if ((currentTime - lastTouchTime) < 500 && // 500ms内
+                    if ((currentTime - lastTouchTime) < 500 &&
                         abs(currentPoint.x - lastTouchPoint.x) < 50 &&
                         abs(currentPoint.y - lastTouchPoint.y) < 50) {
-                        // 视为双击，切换全屏
                         ToggleFullscreen(hWnd);
-                        // 更新按钮文本
                         SetWindowTextW(hFullscreenBtn, IsFullscreen() ? L"窗口化 (F11)" : L"全屏 (F11)");
                     }
 
@@ -141,9 +192,12 @@ void HandleTouchInput(HWND hWnd, WPARAM wParam, LPARAM lParam) {
     }
 }
 
-// 应用程序入口点
-int APIENTRY wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
-    LPWSTR lpCmdLine, int nCmdShow) {
+// 5. 应用程序入口点
+int WINAPI wWinMain(_In_ HINSTANCE hInstance,
+    _In_opt_ HINSTANCE hPrevInstance,
+    _In_ LPWSTR lpCmdLine,
+    _In_ int nCmdShow) {
+
     UNREFERENCED_PARAMETER(hPrevInstance);
     UNREFERENCED_PARAMETER(lpCmdLine);
 
@@ -162,7 +216,7 @@ int APIENTRY wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
     wcex.lpfnWndProc = WndProc;
     wcex.hInstance = hInstance;
     wcex.hCursor = LoadCursor(nullptr, IDC_ARROW);
-    wcex.hbrBackground = CreateSolidBrush(RGB(10, 10, 20)); // 深色背景，类似数字时钟
+    wcex.hbrBackground = CreateSolidBrush(RGB(10, 10, 20));
     wcex.lpszClassName = CLASS_NAME;
     wcex.hIcon = LoadIcon(hInstance, IDI_APPLICATION);
     wcex.hIconSm = LoadIcon(hInstance, IDI_APPLICATION);
@@ -172,21 +226,13 @@ int APIENTRY wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
         return 1;
     }
 
-    // 计算窗口居中位置
-    int screenWidth = GetSystemMetrics(SM_CXSCREEN);
-    int screenHeight = GetSystemMetrics(SM_CYSCREEN);
-    int windowWidth = 800;
-    int windowHeight = 600;
-    int x = (screenWidth - windowWidth) / 2;
-    int y = (screenHeight - windowHeight) / 2;
-
     // 创建主窗口
     hMainWindow = CreateWindowExW(
         WS_EX_APPWINDOW,
         CLASS_NAME,
         L"全屏时间显示器",
         WS_OVERLAPPEDWINDOW,
-        x, y, windowWidth, windowHeight,
+        CW_USEDEFAULT, CW_USEDEFAULT, 800, 600,
         nullptr, nullptr, hInstance, nullptr);
 
     if (!hMainWindow) {
@@ -194,49 +240,16 @@ int APIENTRY wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
         return 1;
     }
 
-    // 设置窗口圆角（Windows 11特性）
+    // 设置窗口圆角
     DWM_WINDOW_CORNER_PREFERENCE cornerPreference = DWMWCP_ROUND;
     DwmSetWindowAttribute(hMainWindow, DWMWA_WINDOW_CORNER_PREFERENCE,
         &cornerPreference, sizeof(cornerPreference));
 
     // 注册触控支持
-    RegisterTouchWindow(hMainWindow, TWF_FINETOUCH); // 启用精细触控减少延迟
+    RegisterTouchWindow(hMainWindow, TWF_FINETOUCH);
 
-    // 创建大字体用于时间显示（Segoe UI Semibold）
-    hLargeFont = CreateFontW(
-        -72,                            // 字体高度（大号）
-        0,                              // 字符平均宽度
-        0,                              // 角度偏移
-        0,                              // 基线到基线距离
-        FW_SEMIBOLD,                   // 字重（半粗）
-        FALSE,                         // 是否斜体
-        FALSE,                         // 是否下划线
-        FALSE,                         // 是否删除线
-        DEFAULT_CHARSET,               // 字符集
-        OUT_DEFAULT_PRECIS,            // 输出精度
-        CLIP_DEFAULT_PRECIS,           // 剪裁精度
-        CLEARTYPE_QUALITY,             // 输出质量（启用ClearType优化）
-        DEFAULT_PITCH,                 // 字族
-        L"Segoe UI"                    // 字体名称
-    );
-
-    // 创建正常字体用于按钮
-    hNormalFont = CreateFontW(
-        -14,                            // 字体高度
-        0,                              // 字符平均宽度
-        0,                              // 角度偏移
-        0,                              // 基线到基线距离
-        FW_NORMAL,                     // 字重
-        FALSE,                         // 是否斜体
-        FALSE,                         // 是否下划线
-        FALSE,                         // 是否删除线
-        DEFAULT_CHARSET,               // 字符集
-        OUT_DEFAULT_PRECIS,            // 输出精度
-        CLIP_DEFAULT_PRECIS,           // 剪裁精度
-        CLEARTYPE_QUALITY,             // 输出质量（启用ClearType优化）
-        DEFAULT_PITCH,                 // 字族
-        L"Segoe UI"                    // 字体名称
-    );
+    // 👈 初始化动态字体（根据初始窗口大小）
+    CreateDynamicFonts(hMainWindow);
 
     // 初始化全屏模块
     InitializeFullscreenModule(hMainWindow);
@@ -245,10 +258,10 @@ int APIENTRY wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
     ShowWindow(hMainWindow, nCmdShow);
     UpdateWindow(hMainWindow);
 
-    // 设置定时器，每秒更新一次显示
+    // 设置定时器
     SetTimer(hMainWindow, 1, 1000, nullptr);
 
-    // Win32消息循环
+    // 消息循环
     MSG msg = {};
     while (GetMessageW(&msg, nullptr, 0, 0)) {
         TranslateMessage(&msg);
@@ -256,114 +269,31 @@ int APIENTRY wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
     }
 
     // 清理资源
-    if (hLargeFont) {
-        DeleteObject(hLargeFont);
-    }
-    if (hNormalFont) {
-        DeleteObject(hNormalFont);
-    }
+    if (hLargeFont) DeleteObject(hLargeFont);
+    if (hDateFont) DeleteObject(hDateFont);
+    if (hNormalFont) DeleteObject(hNormalFont);
 
-    // 清理全屏模块
     CleanupFullscreenModule();
 
     return (int)msg.wParam;
 }
 
-// 窗口过程函数
+// 6. 窗口过程函数
 LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) {
     switch (message) {
     case WM_CREATE: {
-        // 创建控件
         CreateControls(hWnd);
         break;
     }
 
-    case WM_PAINT: {
-        PAINTSTRUCT ps;
-        HDC hdc = BeginPaint(hWnd, &ps);
-
-        // 获取客户区大小
-        RECT clientRect;
-        GetClientRect(hWnd, &clientRect);
-
-        // 获取当前时间日期字符串
-        std::wstring timeDateStr = GetTimeDateString();
-
-        // 解析时间字符串（格式：HH:mm:ss\nYYYY-MM-DD\n星期X）
-        size_t firstNewLine = timeDateStr.find(L'\n');
-        size_t secondNewLine = timeDateStr.find(L'\n', firstNewLine + 1);
-
-        std::wstring timeStr = timeDateStr.substr(0, firstNewLine);
-        std::wstring dateStr = timeDateStr.substr(firstNewLine + 1, secondNewLine - firstNewLine - 1);
-        std::wstring weekStr = timeDateStr.substr(secondNewLine + 1);
-
-        // 计算垂直居中位置（整体紧凑布局）
-        int totalHeight = 250; // 时间 + 日期 + 星期的总高度（紧凑）
-        int startY = (clientRect.bottom - clientRect.top - totalHeight) / 2 - 40; // 稍微上移，给按钮留空间
-
-        // 绘制时间（大号，紧凑）
-        RECT timeRect = clientRect;
-        timeRect.top = startY;
-        timeRect.bottom = startY + 140; // 时间区域高度
-
-        HGDIOBJ hOldFont = SelectObject(hdc, hLargeFont);
-        SetTextColor(hdc, RGB(220, 220, 255));
-        SetBkMode(hdc, TRANSPARENT);
-
-        DrawTextW(hdc, timeStr.c_str(), -1, &timeRect,
-            DT_CENTER | DT_VCENTER | DT_NOPREFIX | DT_SINGLELINE);
-
-        // 创建稍小字体用于日期
-        HFONT hDateFont = CreateFontW(
-            -28,                            // 字体高度（比之前小）
-            0,                              // 字符平均宽度
-            0,                              // 角度偏移
-            0,                              // 基线到基线距离
-            FW_NORMAL,                      // 字重
-            FALSE,                          // 是否斜体
-            FALSE,                          // 是否下划线
-            FALSE,                          // 是否删除线
-            DEFAULT_CHARSET,                // 字符集
-            OUT_DEFAULT_PRECIS,             // 输出精度
-            CLIP_DEFAULT_PRECIS,            // 剪裁精度
-            CLEARTYPE_QUALITY,              // 输出质量
-            DEFAULT_PITCH,                  // 字族
-            L"Segoe UI"                     // 字体名称
-        );
-
-        // 绘制日期（紧凑）
-        RECT dateRect = clientRect;
-        dateRect.top = startY + 150;  // 时间下方留小间距
-        dateRect.bottom = startY + 185;
-
-        HGDIOBJ hOldDateFont = SelectObject(hdc, hDateFont);
-        SetTextColor(hdc, RGB(200, 200, 240));
-
-        DrawTextW(hdc, dateStr.c_str(), -1, &dateRect,
-            DT_CENTER | DT_VCENTER | DT_NOPREFIX | DT_SINGLELINE);
-
-        // 绘制星期（和日期一样大）
-        RECT weekRect = clientRect;
-        weekRect.top = startY + 190;  // 日期下方留小间距
-        weekRect.bottom = startY + 225;
-
-        SetTextColor(hdc, RGB(180, 180, 220));
-        DrawTextW(hdc, weekStr.c_str(), -1, &weekRect,
-            DT_CENTER | DT_VCENTER | DT_NOPREFIX | DT_SINGLELINE);
-
-        SelectObject(hdc, hOldDateFont);
-        DeleteObject(hDateFont);
-        SelectObject(hdc, hOldFont);
-
-        EndPaint(hWnd, &ps);
-        break;
-    }
-
     case WM_SIZE: {
-        // 窗口大小改变时重绘
+        // 👈 窗口大小改变时重新创建字体
+        CreateDynamicFonts(hWnd);
+
+        // 重绘窗口
         InvalidateRect(hWnd, NULL, TRUE);
 
-        // 更新按钮位置（当窗口大小改变时）
+        // 更新按钮位置
         if (hFullscreenBtn && hExitBtn) {
             RECT clientRect;
             GetClientRect(hWnd, &clientRect);
@@ -375,18 +305,78 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) 
             int startX = (clientRect.right - totalWidth) / 2;
 
             SetWindowPos(hFullscreenBtn, NULL,
-                startX, btnY, btnWidth, btnHeight,
-                SWP_NOZORDER);
-
+                startX, btnY, btnWidth, btnHeight, SWP_NOZORDER);
             SetWindowPos(hExitBtn, NULL,
-                startX + btnWidth + 30, btnY, btnWidth, btnHeight,
-                SWP_NOZORDER);
+                startX + btnWidth + 30, btnY, btnWidth, btnHeight, SWP_NOZORDER);
         }
         break;
     }
 
+    case WM_PAINT: {
+        PAINTSTRUCT ps;
+        HDC hdc = BeginPaint(hWnd, &ps);
+
+        RECT clientRect;
+        GetClientRect(hWnd, &clientRect);
+
+        std::wstring timeDateStr = GetTimeDateString();
+
+        size_t firstNewLine = timeDateStr.find(L'\n');
+        size_t secondNewLine = timeDateStr.find(L'\n', firstNewLine + 1);
+
+        std::wstring timeStr = timeDateStr.substr(0, firstNewLine);
+        std::wstring dateStr = timeDateStr.substr(firstNewLine + 1, secondNewLine - firstNewLine - 1);
+        std::wstring weekStr = timeDateStr.substr(secondNewLine + 1);
+
+        // 动态布局计算
+        int windowHeight = clientRect.bottom - clientRect.top;
+        int timeHeight = windowHeight / 3;
+        int dateHeight = windowHeight / 8;
+        int weekHeight = windowHeight / 8;
+
+        int totalHeight = timeHeight + dateHeight + weekHeight + 20;
+        int startY = (windowHeight - totalHeight) / 2 - 20;
+
+        // 绘制时间
+        RECT timeRect = clientRect;
+        timeRect.top = startY;
+        timeRect.bottom = startY + timeHeight;
+
+        HGDIOBJ hOldFont = SelectObject(hdc, hLargeFont);
+        SetTextColor(hdc, RGB(220, 220, 255));
+        SetBkMode(hdc, TRANSPARENT);
+
+        DrawTextW(hdc, timeStr.c_str(), -1, &timeRect,
+            DT_CENTER | DT_VCENTER | DT_NOPREFIX | DT_SINGLELINE);
+
+        // 绘制日期
+        RECT dateRect = clientRect;
+        dateRect.top = startY + timeHeight + 10;
+        dateRect.bottom = dateRect.top + dateHeight;
+
+        HGDIOBJ hOldDateFont = SelectObject(hdc, hDateFont);
+        SetTextColor(hdc, RGB(200, 200, 240));
+
+        DrawTextW(hdc, dateStr.c_str(), -1, &dateRect,
+            DT_CENTER | DT_VCENTER | DT_NOPREFIX | DT_SINGLELINE);
+
+        // 绘制星期
+        RECT weekRect = clientRect;
+        weekRect.top = dateRect.bottom + 10;
+        weekRect.bottom = weekRect.top + weekHeight;
+
+        SetTextColor(hdc, RGB(180, 180, 220));
+        DrawTextW(hdc, weekStr.c_str(), -1, &weekRect,
+            DT_CENTER | DT_VCENTER | DT_NOPREFIX | DT_SINGLELINE);
+
+        SelectObject(hdc, hOldDateFont);
+        SelectObject(hdc, hOldFont);
+
+        EndPaint(hWnd, &ps);
+        break;
+    }
+
     case WM_TIMER: {
-        // 定时器触发，刷新显示
         if (wParam == 1) {
             InvalidateRect(hWnd, NULL, TRUE);
         }
@@ -394,34 +384,29 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) 
     }
 
     case WM_COMMAND: {
-        // 处理按钮点击
         WORD ctrlId = LOWORD(wParam);
-
-        if (ctrlId == 1001) { // 全屏按钮
+        if (ctrlId == 1001) {
             ToggleFullscreen(hWnd);
-            // 更新按钮文本
             SetWindowTextW(hFullscreenBtn, IsFullscreen() ? L"窗口化 (F11)" : L"全屏 (F11)");
         }
-        else if (ctrlId == 1002) { // 退出按钮
+        else if (ctrlId == 1002) {
             PostMessage(hWnd, WM_CLOSE, 0, 0);
         }
         break;
     }
 
     case WM_KEYDOWN: {
-        // 处理快捷键
-        if (wParam == VK_F11) { // F11 切换全屏
+        if (wParam == VK_F11) {
             ToggleFullscreen(hWnd);
             SetWindowTextW(hFullscreenBtn, IsFullscreen() ? L"窗口化 (F11)" : L"全屏 (F11)");
         }
-        else if (wParam == VK_ESCAPE) { // ESC 退出
+        else if (wParam == VK_ESCAPE) {
             PostMessage(hWnd, WM_CLOSE, 0, 0);
         }
         break;
     }
 
     case WM_NCLBUTTONDBLCLK: {
-        // 标题栏双击切换全屏
         if (HandleNcLButtonDblClk(hWnd, wParam)) {
             SetWindowTextW(hFullscreenBtn, IsFullscreen() ? L"窗口化 (F11)" : L"全屏 (F11)");
         }
@@ -430,37 +415,18 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) 
 
     case WM_GETMINMAXINFO: {
         LPMINMAXINFO lpMMI = (LPMINMAXINFO)lParam;
-
-        // 获取系统信息
-        HDC hdc = GetDC(hWnd);
-        HFONT hOldFont = (HFONT)SelectObject(hdc, hLargeFont);
-
-        // 计算时间文字所需的最小尺寸
-        SIZE textSize;
-        GetTextExtentPoint32W(hdc, L"00:00:00", 8, &textSize);
-
-        SelectObject(hdc, hOldFont);
-        ReleaseDC(hWnd, hdc);
-
-        // 计算最小窗口大小：时间文字宽度 + 边距，高度考虑按钮位置
-        int minWidth = max(textSize.cx + 100, 500);  // 至少500，或者文字宽度+100
-        int minHeight = 400;  // 固定最小高度，确保能显示按钮
-
-        lpMMI->ptMinTrackSize.x = minWidth;
-        lpMMI->ptMinTrackSize.y = minHeight;
-
+        lpMMI->ptMinTrackSize.x = 500;
+        lpMMI->ptMinTrackSize.y = 400;
         HandleGetMinMaxInfo(lParam);
         break;
     }
 
     case WM_TOUCH: {
-        // 处理触控输入
         HandleTouchInput(hWnd, wParam, lParam);
-        return 0; // 已处理
+        return 0;
     }
 
     case WM_DESTROY: {
-        // 清理定时器
         KillTimer(hWnd, 1);
         PostQuitMessage(0);
         break;

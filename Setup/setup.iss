@@ -5,7 +5,7 @@
 
 [Setup]
 AppName={#MyAppName}
-AppVersion=1.0
+AppVersion=1.1
 DefaultDirName={autopf}\{#MyAppName}
 DefaultGroupName={#MyAppName}
 OutputDir=E:\code\TimeViwer\Setup
