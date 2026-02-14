@@ -278,60 +278,65 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) 
         RECT clientRect;
         GetClientRect(hWnd, &clientRect);
 
-        // 创建时间文本区域（占据窗口主要区域）
-        RECT timeRect = clientRect;
-        timeRect.bottom = 300; // 时间显示区域高度
-
-        // 获取当前时间日期字符串并居中绘制
+        // 获取当前时间日期字符串
         std::wstring timeDateStr = GetTimeDateString();
-        DrawTextW(hdc, timeDateStr.c_str(), -1, &timeRect,
+
+        // 解析时间字符串（格式：HH:mm:ss\nYYYY-MM-DD\n星期X）
+        size_t firstNewLine = timeDateStr.find(L'\n');
+        size_t secondNewLine = timeDateStr.find(L'\n', firstNewLine + 1);
+
+        std::wstring timeStr = timeDateStr.substr(0, firstNewLine);
+        std::wstring dateStr = timeDateStr.substr(firstNewLine + 1, secondNewLine - firstNewLine - 1);
+        std::wstring weekStr = timeDateStr.substr(secondNewLine + 1);
+
+        // 绘制时间（大号）
+        RECT timeRect = clientRect;
+        timeRect.top = 100;
+        timeRect.bottom = 300;
+        DrawTextW(hdc, timeStr.c_str(), -1, &timeRect,
             DT_CENTER | DT_VCENTER | DT_NOPREFIX | DT_SINGLELINE);
-
-        // 在时间下方添加日期和星期的副标题
-        RECT dateRect = clientRect;
-        dateRect.top = 300;
-        dateRect.bottom = 350;
-
-        // 获取系统时间
-        SYSTEMTIME st;
-        GetLocalTime(&st);
-
-        // 格式化日期字符串
-        const wchar_t* weekdays[] = {
-            L"星期日", L"星期一", L"星期二", L"星期三",
-            L"星期四", L"星期五", L"星期六"
-        };
-        wchar_t dateStr[128];
-        wsprintfW(dateStr, L"%04d年%02d月%02d日  %s",
-            st.wYear, st.wMonth, st.wDay, weekdays[st.wDayOfWeek]);
-
-        // 使用稍小的字体
-        HFONT hDateFont = CreateFontW(
-            -24,                            // 字体高度
-            0,                              // 字符平均宽度
-            0,                              // 角度偏移
-            0,                              // 基线到基线距离
-            FW_NORMAL,                     // 字重
-            FALSE,                         // 是否斜体
-            FALSE,                         // 是否下划线
-            FALSE,                         // 是否删除线
-            DEFAULT_CHARSET,               // 字符集
-            OUT_DEFAULT_PRECIS,            // 输出精度
-            CLIP_DEFAULT_PRECIS,           // 剪裁精度
-            CLEARTYPE_QUALITY,             // 输出质量
-            DEFAULT_PITCH,                 // 字族
-            L"Segoe UI"                    // 字体名称
-        );
-
-        HGDIOBJ hOldDateFont = SelectObject(hdc, hDateFont);
-        SetTextColor(hdc, RGB(180, 180, 220)); // 稍暗的颜色
-        DrawTextW(hdc, dateStr, -1, &dateRect,
-            DT_CENTER | DT_VCENTER | DT_NOPREFIX | DT_SINGLELINE);
-        SelectObject(hdc, hOldDateFont);
-        DeleteObject(hDateFont);
 
         // 恢复原始字体
         SelectObject(hdc, hOldFont);
+
+        // 创建中等字体用于日期
+        HFONT hDateFont = CreateFontW(
+            -36,                            // 字体高度
+            0,                              // 字符平均宽度
+            0,                              // 角度偏移
+            0,                              // 基线到基线距离
+            FW_NORMAL,                      // 字重
+            FALSE,                          // 是否斜体
+            FALSE,                          // 是否下划线
+            FALSE,                          // 是否删除线
+            DEFAULT_CHARSET,                // 字符集
+            OUT_DEFAULT_PRECIS,             // 输出精度
+            CLIP_DEFAULT_PRECIS,            // 剪裁精度
+            CLEARTYPE_QUALITY,              // 输出质量
+            DEFAULT_PITCH,                  // 字族
+            L"Segoe UI"                     // 字体名称
+        );
+
+        HGDIOBJ hOldDateFont = SelectObject(hdc, hDateFont);
+        SetTextColor(hdc, RGB(200, 200, 240));
+
+        // 绘制日期
+        RECT dateRect = clientRect;
+        dateRect.top = 320;
+        dateRect.bottom = 380;
+        DrawTextW(hdc, dateStr.c_str(), -1, &dateRect,
+            DT_CENTER | DT_VCENTER | DT_NOPREFIX | DT_SINGLELINE);
+
+        // 绘制星期
+        RECT weekRect = clientRect;
+        weekRect.top = 380;
+        weekRect.bottom = 440;
+        DrawTextW(hdc, weekStr.c_str(), -1, &weekRect,
+            DT_CENTER | DT_VCENTER | DT_NOPREFIX | DT_SINGLELINE);
+
+        SelectObject(hdc, hOldDateFont);
+        DeleteObject(hDateFont);
+
         EndPaint(hWnd, &ps);
         break;
     }
