@@ -1,6 +1,6 @@
 ﻿// fullscreen.cpp
 // 全屏切换功能模块实现文件
-// 提供F11快捷键和标题栏双击切换全屏功能，支持任务栏保留的非独占全屏模式
+// 提供F11快捷键和标题栏双击切换全屏功能，支持真正的全屏覆盖（含任务栏）
 
 #include "fullscreen.h"
 #include <windows.h>
@@ -22,22 +22,22 @@ bool ToggleFullscreen(HWND hWnd)
     if (!hWnd || !IsWindow(hWnd))
         return false;
 
-    RECT rcWorkArea;
+    RECT rcMonitorArea;
     MONITORINFO mi = { sizeof(mi) };
 
-    // 获取窗口所在的显示器工作区域（排除任务栏）
+    // 获取窗口所在的显示器完整区域（包括任务栏）
     HMONITOR hMonitor = MonitorFromWindow(hWnd, MONITOR_DEFAULTTONEAREST);
     if (hMonitor && GetMonitorInfo(hMonitor, &mi))
     {
-        rcWorkArea = mi.rcWork;
+        rcMonitorArea = mi.rcMonitor;  // 使用 rcMonitor 获得全屏区域
     }
     else
     {
         // 失败时回退到整个屏幕区域
-        rcWorkArea.left = 0;
-        rcWorkArea.top = 0;
-        rcWorkArea.right = GetSystemMetrics(SM_CXSCREEN);
-        rcWorkArea.bottom = GetSystemMetrics(SM_CYSCREEN);
+        rcMonitorArea.left = 0;
+        rcMonitorArea.top = 0;
+        rcMonitorArea.right = GetSystemMetrics(SM_CXSCREEN);
+        rcMonitorArea.bottom = GetSystemMetrics(SM_CYSCREEN);
     }
 
     if (!g_bFullscreen)
@@ -56,11 +56,14 @@ bool ToggleFullscreen(HWND hWnd)
         LONG newStyle = g_lStyle & ~(WS_CAPTION | WS_THICKFRAME | WS_MINIMIZEBOX | WS_MAXIMIZEBOX | WS_SYSMENU);
         SetWindowLong(hWnd, GWL_STYLE, newStyle);
 
-        // 调整窗口大小至工作区域
-        SetWindowPos(hWnd, HWND_TOP,
-            rcWorkArea.left, rcWorkArea.top,
-            rcWorkArea.right - rcWorkArea.left,
-            rcWorkArea.bottom - rcWorkArea.top,
+        // 添加置顶扩展样式，确保覆盖任务栏
+        SetWindowLong(hWnd, GWL_EXSTYLE, g_lExStyle | WS_EX_TOPMOST);
+
+        // 调整窗口大小至完整显示器区域，并置顶
+        SetWindowPos(hWnd, HWND_TOPMOST,
+            rcMonitorArea.left, rcMonitorArea.top,
+            rcMonitorArea.right - rcMonitorArea.left,
+            rcMonitorArea.bottom - rcMonitorArea.top,
             SWP_FRAMECHANGED | SWP_SHOWWINDOW);
 
         g_bFullscreen = true;
@@ -74,9 +77,9 @@ bool ToggleFullscreen(HWND hWnd)
 
         // 恢复原始窗口位置和大小
         SetWindowPlacement(hWnd, &g_wpPrev);
-        SetWindowPos(hWnd, NULL, 0, 0, 0, 0,
-            SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER |
-            SWP_FRAMECHANGED | SWP_DRAWFRAME);
+        // 取消置顶，使窗口不再覆盖任务栏
+        SetWindowPos(hWnd, HWND_NOTOPMOST, 0, 0, 0, 0,
+            SWP_NOMOVE | SWP_NOSIZE | SWP_FRAMECHANGED);
 
         g_bFullscreen = false;
     }
@@ -135,11 +138,10 @@ bool HandleNcLButtonDblClk(HWND hWnd, WPARAM wParam)
     return false;
 }
 
-
- /**
-  * 处理WM_GETMINMAXINFO消息以限制窗口最小大小
-  * @param lParam: MINMAXINFO结构指针
-  */
+/**
+ * 处理WM_GETMINMAXINFO消息以限制窗口最小大小
+ * @param lParam: MINMAXINFO结构指针
+ */
 void HandleGetMinMaxInfo(LPARAM lParam)
 {
     LPMINMAXINFO lpMMI = (LPMINMAXINFO)lParam;
