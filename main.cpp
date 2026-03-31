@@ -58,6 +58,7 @@ void HandleTouchInput(HWND hWnd, WPARAM wParam, LPARAM lParam);
 void CreateDynamicFonts(HWND hWnd);
 void StartSync(HWND hWnd);               // 启动异步同步
 void SyncThreadProc(HWND hWnd);          // 同步线程函数
+FontSizes CalculateFontSizes(HWND hWnd);
 
 // ==================== 函数实现 ====================
 
@@ -85,24 +86,9 @@ std::wstring GetTimeDateString() {
 
 // 2. 动态字体创建函数
 void CreateDynamicFonts(HWND hWnd) {
-    RECT clientRect;
-    GetClientRect(hWnd, &clientRect);
+    FontSizes sizes = CalculateFontSizes(hWnd);
 
-    // ===== 获取当前DPI =====
-    UINT dpi = GetWindowDpi(hWnd);
-    float scaleFactor = dpi / 96.0f;  // 相对于100%缩放的倍数
-    // =======================
-
-    int windowHeight = clientRect.bottom - clientRect.top;
-    int windowWidth = clientRect.right - clientRect.left;
-
-    // 使用DPI缩放后的字体大小
-    int timeFontSize = max(36, min(120, (int)(windowHeight / 5 * scaleFactor)));
-    int dateFontSize = max(16, min(48, (int)(windowHeight / 12 * scaleFactor)));
-
-    // 按钮字体也使用DPI缩放
-    int btnFontSize = (int)(14 * scaleFactor);
-
+    // 释放旧字体
     if (hLargeFont) {
         DeleteObject(hLargeFont);
         hLargeFont = nullptr;
@@ -111,35 +97,51 @@ void CreateDynamicFonts(HWND hWnd) {
         DeleteObject(hDateFont);
         hDateFont = nullptr;
     }
+    if (hNormalFont) {
+        DeleteObject(hNormalFont);
+        hNormalFont = nullptr;
+    }
 
+    // 创建时间字体
     hLargeFont = CreateFontW(
-        -timeFontSize, 0, 0, 0, FW_SEMIBOLD,
+        -sizes.time, 0, 0, 0, FW_BOLD,
         FALSE, FALSE, FALSE, DEFAULT_CHARSET,
         OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
         CLEARTYPE_QUALITY, DEFAULT_PITCH, L"Segoe UI"
     );
 
+    // 创建日期字体
     hDateFont = CreateFontW(
-        -dateFontSize, 0, 0, 0, FW_NORMAL,
+        -sizes.date, 0, 0, 0, FW_SEMIBOLD,
         FALSE, FALSE, FALSE, DEFAULT_CHARSET,
         OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
         CLEARTYPE_QUALITY, DEFAULT_PITCH, L"Segoe UI"
     );
 
-    if (!hNormalFont) {
-        hNormalFont = CreateFontW(
-            -14, 0, 0, 0, FW_NORMAL,
+    // 创建星期字体
+    hNormalFont = CreateFontW(
+        -sizes.week, 0, 0, 0, FW_NORMAL,
+        FALSE, FALSE, FALSE, DEFAULT_CHARSET,
+        OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+        CLEARTYPE_QUALITY, DEFAULT_PITCH, L"Segoe UI"
+    );
+
+    // 按钮字体单独处理
+    if (hFullscreenBtn && hExitBtn && hSyncBtn) {
+        HFONT hBtnFont = CreateFontW(
+            -sizes.button, 0, 0, 0, FW_MEDIUM,
             FALSE, FALSE, FALSE, DEFAULT_CHARSET,
             OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
             CLEARTYPE_QUALITY, DEFAULT_PITCH, L"Segoe UI"
         );
-    }
 
-    // 更新按钮字体
-    if (hFullscreenBtn && hExitBtn && hSyncBtn && hNormalFont) {
-        SendMessageW(hFullscreenBtn, WM_SETFONT, (WPARAM)hNormalFont, TRUE);
-        SendMessageW(hExitBtn, WM_SETFONT, (WPARAM)hNormalFont, TRUE);
-        SendMessageW(hSyncBtn, WM_SETFONT, (WPARAM)hNormalFont, TRUE);
+        SendMessageW(hFullscreenBtn, WM_SETFONT, (WPARAM)hBtnFont, TRUE);
+        SendMessageW(hExitBtn, WM_SETFONT, (WPARAM)hBtnFont, TRUE);
+        SendMessageW(hSyncBtn, WM_SETFONT, (WPARAM)hBtnFont, TRUE);
+
+        // 保存按钮字体引用
+        if (hNormalFont) DeleteObject(hNormalFont);
+        hNormalFont = hBtnFont;
     }
 }
 
@@ -261,7 +263,44 @@ void SyncThreadProc(HWND hWnd) {
     }
 }
 
-// 7. 应用程序入口点
+// 7. 设定字体大小
+FontSizes CalculateFontSizes(HWND hWnd) {
+    RECT clientRect;
+    GetClientRect(hWnd, &clientRect);
+
+    UINT dpi = GetWindowDpi(hWnd);
+    float scaleFactor = dpi / 96.0f;
+
+    int windowHeight = clientRect.bottom - clientRect.top;
+    int windowWidth = clientRect.right - clientRect.left;
+
+    FontSizes sizes;
+
+    // 时间字体
+    int targetTimeHeight = (int)(windowHeight * 0.35);
+
+    // 字体大小应该是显示区域高度的 0.7-0.8 倍
+    sizes.time = (int)(targetTimeHeight * 0.75);
+
+    // 限制字体大小范围
+    sizes.time = max(40, min(sizes.time, (int)(windowHeight * 0.45)));
+
+    // 日期字体
+    sizes.date = (int)(sizes.time * 0.3);
+    sizes.date = max(15, min(sizes.date, (int)(windowHeight * 0.12)));
+
+    // 星期字体
+    sizes.week = (int)(sizes.time * 0.3);
+    sizes.week = max(15, min(sizes.week, (int)(windowHeight * 0.1)));
+
+    // 按钮字体
+    int btnBase = 20;
+    sizes.button = btnBase;
+
+    return sizes;
+}
+
+// 8. 应用程序入口点
 int WINAPI wWinMain(_In_ HINSTANCE hInstance,
     _In_opt_ HINSTANCE hPrevInstance,
     _In_ LPWSTR lpCmdLine,
