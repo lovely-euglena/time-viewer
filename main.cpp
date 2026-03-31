@@ -1,16 +1,32 @@
 ﻿// main.cpp
 // Windows 11风格时间显示主程序
 
+// 必须最先包含 winsock2.h，避免与 windows.h 冲突
+#include <winsock2.h>
+#include <ws2tcpip.h>
+
+// 然后包含其他 Windows 头文件
 #include <windows.h>
 #include <dwmapi.h>
-#include <string>
 #include <commctrl.h>
+
+// 其余头文件
+#include <string>
+#include <thread>
+#include <atomic>
+#include "fullscreen.h"
+#include "ntp_client.h"
 
 #pragma comment(lib, "dwmapi.lib")
 #pragma comment(lib, "comctl32.lib")
 
-// 包含全屏模块头文件
-#include "fullscreen.h"
+// 按钮ID定义
+#define ID_FULLSCREEN_BTN  1001
+#define ID_EXIT_BTN        1002
+#define ID_SYNC_BTN        1003
+
+// 自定义消息：NTP同步完成
+#define WM_NTP_SYNC_FINISHED (WM_USER + 100)
 
 // 窗口过程函数声明
 LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam);
@@ -22,12 +38,19 @@ HFONT hNormalFont = nullptr;    // 按钮字体
 HWND hMainWindow = nullptr;     // 主窗口句柄
 HWND hFullscreenBtn = nullptr;  // 全屏按钮句柄
 HWND hExitBtn = nullptr;        // 退出按钮句柄
+HWND hSyncBtn = nullptr;        // NTP同步按钮句柄
+
+std::atomic<bool> g_syncing{ false };   // 同步进行中标志
+std::atomic<bool> g_exitFlag{ false };  // 程序退出标志
+std::thread g_syncThread;               // 同步线程对象
 
 // ==================== 函数声明 ====================
 std::wstring GetTimeDateString();
 void CreateControls(HWND hWnd);
 void HandleTouchInput(HWND hWnd, WPARAM wParam, LPARAM lParam);
-void CreateDynamicFonts(HWND hWnd);  // 👈 新增：动态字体创建函数声明
+void CreateDynamicFonts(HWND hWnd);
+void StartSync(HWND hWnd);               // 启动异步同步
+void SyncThreadProc(HWND hWnd);          // 同步线程函数
 
 // ==================== 函数实现 ====================
 
@@ -53,18 +76,15 @@ std::wstring GetTimeDateString() {
     return result;
 }
 
-// 2. 👈 新增：动态字体创建函数（放在这里）
+// 2. 动态字体创建函数
 void CreateDynamicFonts(HWND hWnd) {
-    // 获取客户区大小
     RECT clientRect;
     GetClientRect(hWnd, &clientRect);
 
-    // 计算字体大小：时间字体为窗口高度的 1/5，日期字体为窗口高度的 1/12
     int windowHeight = clientRect.bottom - clientRect.top;
-    int timeFontSize = max(36, min(120, windowHeight / 5));  // 范围 36-120
-    int dateFontSize = max(16, min(48, windowHeight / 12));  // 范围 16-48
+    int timeFontSize = max(36, min(120, windowHeight / 5));
+    int dateFontSize = max(16, min(48, windowHeight / 12));
 
-    // 删除旧字体
     if (hLargeFont) {
         DeleteObject(hLargeFont);
         hLargeFont = nullptr;
@@ -74,54 +94,38 @@ void CreateDynamicFonts(HWND hWnd) {
         hDateFont = nullptr;
     }
 
-    // 创建新的大字体（时间）
     hLargeFont = CreateFontW(
-        -timeFontSize,                   // 动态字体高度
-        0, 0, 0, FW_SEMIBOLD,
-        FALSE, FALSE, FALSE,
-        DEFAULT_CHARSET,
-        OUT_DEFAULT_PRECIS,
-        CLIP_DEFAULT_PRECIS,
-        CLEARTYPE_QUALITY,
-        DEFAULT_PITCH,
-        L"Segoe UI"
+        -timeFontSize, 0, 0, 0, FW_SEMIBOLD,
+        FALSE, FALSE, FALSE, DEFAULT_CHARSET,
+        OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+        CLEARTYPE_QUALITY, DEFAULT_PITCH, L"Segoe UI"
     );
 
-    // 创建新的日期字体
     hDateFont = CreateFontW(
-        -dateFontSize,                    // 动态字体高度
-        0, 0, 0, FW_NORMAL,
-        FALSE, FALSE, FALSE,
-        DEFAULT_CHARSET,
-        OUT_DEFAULT_PRECIS,
-        CLIP_DEFAULT_PRECIS,
-        CLEARTYPE_QUALITY,
-        DEFAULT_PITCH,
-        L"Segoe UI"
+        -dateFontSize, 0, 0, 0, FW_NORMAL,
+        FALSE, FALSE, FALSE, DEFAULT_CHARSET,
+        OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+        CLEARTYPE_QUALITY, DEFAULT_PITCH, L"Segoe UI"
     );
 
-    // 按钮字体保持固定大小
     if (!hNormalFont) {
         hNormalFont = CreateFontW(
             -14, 0, 0, 0, FW_NORMAL,
-            FALSE, FALSE, FALSE,
-            DEFAULT_CHARSET,
-            OUT_DEFAULT_PRECIS,
-            CLIP_DEFAULT_PRECIS,
-            CLEARTYPE_QUALITY,
-            DEFAULT_PITCH,
-            L"Segoe UI"
+            FALSE, FALSE, FALSE, DEFAULT_CHARSET,
+            OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+            CLEARTYPE_QUALITY, DEFAULT_PITCH, L"Segoe UI"
         );
     }
 
     // 更新按钮字体
-    if (hFullscreenBtn && hExitBtn && hNormalFont) {
+    if (hFullscreenBtn && hExitBtn && hSyncBtn && hNormalFont) {
         SendMessageW(hFullscreenBtn, WM_SETFONT, (WPARAM)hNormalFont, TRUE);
         SendMessageW(hExitBtn, WM_SETFONT, (WPARAM)hNormalFont, TRUE);
+        SendMessageW(hSyncBtn, WM_SETFONT, (WPARAM)hNormalFont, TRUE);
     }
 }
 
-// 3. 创建控件函数
+// 3. 创建控件函数（三个按钮）
 void CreateControls(HWND hWnd) {
     RECT clientRect;
     GetClientRect(hWnd, &clientRect);
@@ -129,32 +133,45 @@ void CreateControls(HWND hWnd) {
     int btnWidth = 120;
     int btnHeight = 40;
     int btnY = clientRect.bottom - btnHeight - 20;
-    int totalWidth = btnWidth * 2 + 30;
+    int spacing = 20;
+    int totalWidth = btnWidth * 3 + spacing * 2;
     int startX = (clientRect.right - totalWidth) / 2;
 
+    // 全屏按钮
     hFullscreenBtn = CreateWindowW(
         L"BUTTON", L"全屏 (F11)",
         WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_PUSHBUTTON | BS_FLAT,
         startX, btnY, btnWidth, btnHeight,
-        hWnd, (HMENU)1001,
+        hWnd, (HMENU)ID_FULLSCREEN_BTN,
         (HINSTANCE)GetWindowLongPtr(hWnd, GWLP_HINSTANCE), NULL
     );
 
+    // 退出按钮
     hExitBtn = CreateWindowW(
         L"BUTTON", L"退出 (Esc)",
         WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_PUSHBUTTON | BS_FLAT,
-        startX + btnWidth + 30, btnY, btnWidth, btnHeight,
-        hWnd, (HMENU)1002,
+        startX + btnWidth + spacing, btnY, btnWidth, btnHeight,
+        hWnd, (HMENU)ID_EXIT_BTN,
         (HINSTANCE)GetWindowLongPtr(hWnd, GWLP_HINSTANCE), NULL
     );
 
-    if (hNormalFont && hFullscreenBtn && hExitBtn) {
+    // 同步按钮
+    hSyncBtn = CreateWindowW(
+        L"BUTTON", L"同步时间",
+        WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_PUSHBUTTON | BS_FLAT,
+        startX + (btnWidth + spacing) * 2, btnY, btnWidth, btnHeight,
+        hWnd, (HMENU)ID_SYNC_BTN,
+        (HINSTANCE)GetWindowLongPtr(hWnd, GWLP_HINSTANCE), NULL
+    );
+
+    if (hNormalFont && hFullscreenBtn && hExitBtn && hSyncBtn) {
         SendMessageW(hFullscreenBtn, WM_SETFONT, (WPARAM)hNormalFont, TRUE);
         SendMessageW(hExitBtn, WM_SETFONT, (WPARAM)hNormalFont, TRUE);
+        SendMessageW(hSyncBtn, WM_SETFONT, (WPARAM)hNormalFont, TRUE);
     }
 }
 
-// 4. 触摸输入处理函数
+// 4. 触摸输入处理（不变）
 void HandleTouchInput(HWND hWnd, WPARAM wParam, LPARAM lParam) {
     UINT cInputs = LOWORD(wParam);
     PTOUCHINPUT pInputs = new TOUCHINPUT[cInputs];
@@ -192,7 +209,35 @@ void HandleTouchInput(HWND hWnd, WPARAM wParam, LPARAM lParam) {
     }
 }
 
-// 5. 应用程序入口点
+// 5. 启动异步同步
+void StartSync(HWND hWnd) {
+    if (g_syncing) return; // 已经在同步中
+    g_syncing = true;
+
+    // 修改按钮文本为“同步中”
+    SetWindowTextW(hSyncBtn, L"同步中");
+
+    // 如果已有线程，等待其结束（正常情况下不会发生）
+    if (g_syncThread.joinable()) {
+        g_syncThread.join();
+    }
+
+    // 创建新线程
+    g_syncThread = std::thread(SyncThreadProc, hWnd);
+}
+
+// 6. 同步线程函数
+void SyncThreadProc(HWND hWnd) {
+    // 调用NTP同步（可能会阻塞几秒）
+    bool success = SyncTimeOnce();
+
+    // 程序未退出时才发送消息
+    if (!g_exitFlag) {
+        PostMessageW(hWnd, WM_NTP_SYNC_FINISHED, success ? 1 : 0, 0);
+    }
+}
+
+// 7. 应用程序入口点
 int WINAPI wWinMain(_In_ HINSTANCE hInstance,
     _In_opt_ HINSTANCE hPrevInstance,
     _In_ LPWSTR lpCmdLine,
@@ -218,10 +263,8 @@ int WINAPI wWinMain(_In_ HINSTANCE hInstance,
     wcex.hCursor = LoadCursor(nullptr, IDC_ARROW);
     wcex.hbrBackground = CreateSolidBrush(RGB(10, 10, 20));
     wcex.lpszClassName = CLASS_NAME;
-    wcex.hIcon = LoadIcon(hInstance, IDI_APPLICATION);
-    wcex.hIconSm = LoadIcon(hInstance, IDI_APPLICATION);
-    wcex.hIcon = LoadIconW(hInstance, MAKEINTRESOURCE(101));  // 大图标
-    wcex.hIconSm = LoadIconW(hInstance, MAKEINTRESOURCE(101)); // 小图标（任务栏）
+    wcex.hIcon = LoadIconW(hInstance, MAKEINTRESOURCE(101));
+    wcex.hIconSm = LoadIconW(hInstance, MAKEINTRESOURCE(101));
 
     if (!RegisterClassExW(&wcex)) {
         MessageBoxW(nullptr, L"窗口类注册失败！", L"错误", MB_ICONERROR);
@@ -250,7 +293,13 @@ int WINAPI wWinMain(_In_ HINSTANCE hInstance,
     // 注册触控支持
     RegisterTouchWindow(hMainWindow, TWF_FINETOUCH);
 
-    // 👈 初始化动态字体（根据初始窗口大小）
+    // 初始化NTP客户端
+    if (!InitializeNTPClient()) {
+        // 初始化失败，按钮可能不可用，但程序继续运行
+        OutputDebugStringW(L"NTP客户端初始化失败\n");
+    }
+
+    // 初始化动态字体
     CreateDynamicFonts(hMainWindow);
 
     // 初始化全屏模块
@@ -260,7 +309,13 @@ int WINAPI wWinMain(_In_ HINSTANCE hInstance,
     ShowWindow(hMainWindow, nCmdShow);
     UpdateWindow(hMainWindow);
 
-    // 设置定时器
+    // 启动 NTP 自动同步（后台定时同步，每小时一次）
+    StartAutoSync();
+
+    // 可选：启动后立即手动同步一次时间（异步，不阻塞UI）
+    StartSync(hMainWindow);  // 使用已有的异步同步函数
+
+    // 设置定时器（每秒刷新时间显示）
     SetTimer(hMainWindow, 1, 1000, nullptr);
 
     // 消息循环
@@ -275,12 +330,21 @@ int WINAPI wWinMain(_In_ HINSTANCE hInstance,
     if (hDateFont) DeleteObject(hDateFont);
     if (hNormalFont) DeleteObject(hNormalFont);
 
+    // 等待同步线程结束（如果还在运行）
+    g_exitFlag = true;
+    if (g_syncThread.joinable()) {
+        g_syncThread.join();
+    }
+
+    // 清理NTP客户端
+    CleanupNTPClient();
+
     CleanupFullscreenModule();
 
     return (int)msg.wParam;
 }
 
-// 6. 窗口过程函数
+// 8. 窗口过程函数
 LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) {
     switch (message) {
     case WM_CREATE: {
@@ -289,27 +353,30 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) 
     }
 
     case WM_SIZE: {
-        // 👈 窗口大小改变时重新创建字体
+        // 重新创建字体以适应新窗口大小
         CreateDynamicFonts(hWnd);
 
         // 重绘窗口
         InvalidateRect(hWnd, NULL, TRUE);
 
-        // 更新按钮位置
-        if (hFullscreenBtn && hExitBtn) {
+        // 更新三个按钮的位置
+        if (hFullscreenBtn && hExitBtn && hSyncBtn) {
             RECT clientRect;
             GetClientRect(hWnd, &clientRect);
 
             int btnWidth = 120;
             int btnHeight = 40;
             int btnY = clientRect.bottom - btnHeight - 20;
-            int totalWidth = btnWidth * 2 + 30;
+            int spacing = 20;
+            int totalWidth = btnWidth * 3 + spacing * 2;
             int startX = (clientRect.right - totalWidth) / 2;
 
             SetWindowPos(hFullscreenBtn, NULL,
                 startX, btnY, btnWidth, btnHeight, SWP_NOZORDER);
             SetWindowPos(hExitBtn, NULL,
-                startX + btnWidth + 30, btnY, btnWidth, btnHeight, SWP_NOZORDER);
+                startX + btnWidth + spacing, btnY, btnWidth, btnHeight, SWP_NOZORDER);
+            SetWindowPos(hSyncBtn, NULL,
+                startX + (btnWidth + spacing) * 2, btnY, btnWidth, btnHeight, SWP_NOZORDER);
         }
         break;
     }
@@ -330,7 +397,6 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) 
         std::wstring dateStr = timeDateStr.substr(firstNewLine + 1, secondNewLine - firstNewLine - 1);
         std::wstring weekStr = timeDateStr.substr(secondNewLine + 1);
 
-        // 动态布局计算
         int windowHeight = clientRect.bottom - clientRect.top;
         int timeHeight = windowHeight / 3;
         int dateHeight = windowHeight / 8;
@@ -387,12 +453,15 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) 
 
     case WM_COMMAND: {
         WORD ctrlId = LOWORD(wParam);
-        if (ctrlId == 1001) {
+        if (ctrlId == ID_FULLSCREEN_BTN) {
             ToggleFullscreen(hWnd);
             SetWindowTextW(hFullscreenBtn, IsFullscreen() ? L"窗口化 (F11)" : L"全屏 (F11)");
         }
-        else if (ctrlId == 1002) {
+        else if (ctrlId == ID_EXIT_BTN) {
             PostMessage(hWnd, WM_CLOSE, 0, 0);
+        }
+        else if (ctrlId == ID_SYNC_BTN) {
+            StartSync(hWnd);  // 手动同步
         }
         break;
     }
@@ -426,6 +495,18 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) 
     case WM_TOUCH: {
         HandleTouchInput(hWnd, wParam, lParam);
         return 0;
+    }
+
+    case WM_NTP_SYNC_FINISHED: {
+        // 同步完成，wParam为1表示成功，0表示失败
+        if (wParam == 1) {
+            SetWindowTextW(hSyncBtn, L"同步成功");
+        }
+        else {
+            SetWindowTextW(hSyncBtn, L"同步失败");
+        }
+        g_syncing = false;
+        break;
     }
 
     case WM_DESTROY: {
