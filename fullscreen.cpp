@@ -186,3 +186,48 @@ void CleanupFullscreenModule()
     // 当前无动态分配资源需要清理
     // 可在此添加其他清理逻辑
 }
+
+// fullscreen.cpp - 在文件末尾添加
+
+/**
+ * 获取窗口当前所在的DPI值
+ * @param hWnd: 窗口句柄
+ * @return DPI值（如96, 120, 144, 192等）
+ */
+UINT GetWindowDpi(HWND hWnd) {
+    UINT dpi = 96; // 默认96 DPI
+
+    if (!hWnd || !IsWindow(hWnd)) {
+        return dpi;
+    }
+
+    // 方法1：使用 GetDpiForWindow (Windows 10 1607+)
+    HMODULE hUser32 = GetModuleHandleW(L"user32.dll");
+    if (hUser32) {
+        auto pGetDpiForWindow = (UINT(WINAPI*)(HWND))GetProcAddress(hUser32, "GetDpiForWindow");
+        if (pGetDpiForWindow) {
+            dpi = pGetDpiForWindow(hWnd);
+            if (dpi > 0) {
+                return dpi;
+            }
+        }
+    }
+
+    // 方法2：使用 GetDpiForMonitor (Windows 8.1+)
+    HMONITOR hMonitor = MonitorFromWindow(hWnd, MONITOR_DEFAULTTONEAREST);
+    if (hMonitor) {
+        HMODULE hShcore = LoadLibraryW(L"shcore.dll");
+        if (hShcore) {
+            auto pGetDpiForMonitor = (HRESULT(WINAPI*)(HMONITOR, int, UINT*, UINT*))GetProcAddress(hShcore, "GetDpiForMonitor");
+            if (pGetDpiForMonitor) {
+                UINT dpiX, dpiY;
+                if (SUCCEEDED(pGetDpiForMonitor(hMonitor, 0, &dpiX, &dpiY))) {
+                    dpi = dpiX;
+                }
+            }
+            FreeLibrary(hShcore);
+        }
+    }
+
+    return dpi;
+}

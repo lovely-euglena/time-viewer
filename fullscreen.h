@@ -14,3 +14,4 @@ bool HandleNcLButtonDblClk(HWND hWnd, WPARAM wParam);
 void HandleGetMinMaxInfo(LPARAM lParam);
 void InitializeFullscreenModule(HWND hWnd);
 void CleanupFullscreenModule();
+UINT GetWindowDpi(HWND hWnd);

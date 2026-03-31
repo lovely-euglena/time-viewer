@@ -44,6 +44,13 @@ std::atomic<bool> g_syncing{ false };   // 同步进行中标志
 std::atomic<bool> g_exitFlag{ false };  // 程序退出标志
 std::thread g_syncThread;               // 同步线程对象
 
+struct FontSizes {
+    int time;
+    int date;
+    int week;
+    int button;
+};
+
 // ==================== 函数声明 ====================
 std::wstring GetTimeDateString();
 void CreateControls(HWND hWnd);
@@ -81,9 +88,20 @@ void CreateDynamicFonts(HWND hWnd) {
     RECT clientRect;
     GetClientRect(hWnd, &clientRect);
 
+    // ===== 获取当前DPI =====
+    UINT dpi = GetWindowDpi(hWnd);
+    float scaleFactor = dpi / 96.0f;  // 相对于100%缩放的倍数
+    // =======================
+
     int windowHeight = clientRect.bottom - clientRect.top;
-    int timeFontSize = max(36, min(120, windowHeight / 5));
-    int dateFontSize = max(16, min(48, windowHeight / 12));
+    int windowWidth = clientRect.right - clientRect.left;
+
+    // 使用DPI缩放后的字体大小
+    int timeFontSize = max(36, min(120, (int)(windowHeight / 5 * scaleFactor)));
+    int dateFontSize = max(16, min(48, (int)(windowHeight / 12 * scaleFactor)));
+
+    // 按钮字体也使用DPI缩放
+    int btnFontSize = (int)(14 * scaleFactor);
 
     if (hLargeFont) {
         DeleteObject(hLargeFont);
@@ -130,10 +148,16 @@ void CreateControls(HWND hWnd) {
     RECT clientRect;
     GetClientRect(hWnd, &clientRect);
 
-    int btnWidth = 120;
-    int btnHeight = 40;
-    int btnY = clientRect.bottom - btnHeight - 20;
-    int spacing = 20;
+    // ===== 获取当前DPI，计算缩放比例 =====
+    UINT dpi = GetWindowDpi(hWnd);
+    float scaleFactor = dpi / 96.0f;
+
+    // 按钮尺寸基于DPI缩放
+    int btnWidth = (int)(120 * scaleFactor);
+    int btnHeight = (int)(40 * scaleFactor);
+    int spacing = (int)(20 * scaleFactor);
+    int btnY = clientRect.bottom - btnHeight - (int)(20 * scaleFactor);
+
     int totalWidth = btnWidth * 3 + spacing * 2;
     int startX = (clientRect.right - totalWidth) / 2;
 
@@ -242,6 +266,22 @@ int WINAPI wWinMain(_In_ HINSTANCE hInstance,
     _In_opt_ HINSTANCE hPrevInstance,
     _In_ LPWSTR lpCmdLine,
     _In_ int nCmdShow) {
+
+    // ===== 添加：主动设置DPI感知 =====
+    // 方式1：使用Win10+的PerMonitorV2
+    HMODULE hUser32 = LoadLibraryW(L"user32.dll");
+    if (hUser32) {
+        auto pSetProcessDpiAwarenessContext = (BOOL(WINAPI*)(DPI_AWARENESS_CONTEXT))GetProcAddress(hUser32, "SetProcessDpiAwarenessContext");
+        if (pSetProcessDpiAwarenessContext) {
+            pSetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+        }
+        FreeLibrary(hUser32);
+    }
+    // 备用：使用Win8.1方式
+    else {
+        SetProcessDPIAware(); // 旧版API
+    }
+    // ====
 
     UNREFERENCED_PARAMETER(hPrevInstance);
     UNREFERENCED_PARAMETER(lpCmdLine);
@@ -352,6 +392,29 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) 
         break;
     }
 
+    case WM_DPICHANGED: {
+        // wParam的低16位是新的DPI值
+        UINT newDpi = LOWORD(wParam);
+
+        // lParam包含系统建议的新窗口位置和大小
+        RECT* newRect = (RECT*)lParam;
+
+        // 调整窗口大小到建议的尺寸
+        SetWindowPos(hWnd, NULL,
+            newRect->left, newRect->top,
+            newRect->right - newRect->left,
+            newRect->bottom - newRect->top,
+            SWP_NOZORDER | SWP_NOACTIVATE);
+
+        // 重新创建字体以适应新的DPI
+        CreateDynamicFonts(hWnd);
+
+        // 强制重绘
+        InvalidateRect(hWnd, NULL, TRUE);
+        return 0;
+    }
+    // ===== DPI处理结束 =====
+
     case WM_SIZE: {
         // 重新创建字体以适应新窗口大小
         CreateDynamicFonts(hWnd);
@@ -364,12 +427,17 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) 
             RECT clientRect;
             GetClientRect(hWnd, &clientRect);
 
-            int btnWidth = 120;
-            int btnHeight = 40;
-            int btnY = clientRect.bottom - btnHeight - 20;
-            int spacing = 20;
+            // ===== 使用DPI缩放计算按钮位置 =====
+            UINT dpi = GetWindowDpi(hWnd);
+            float scaleFactor = dpi / 96.0f;
+
+            int btnWidth = (int)(120 * scaleFactor);
+            int btnHeight = (int)(40 * scaleFactor);
+            int btnY = clientRect.bottom - btnHeight - (int)(20 * scaleFactor);
+            int spacing = (int)(20 * scaleFactor);
             int totalWidth = btnWidth * 3 + spacing * 2;
-            int startX = (clientRect.right - totalWidth) / 2;
+            int startX = max(0, (clientRect.right - totalWidth) / 2);
+            // =================================
 
             SetWindowPos(hFullscreenBtn, NULL,
                 startX, btnY, btnWidth, btnHeight, SWP_NOZORDER);
