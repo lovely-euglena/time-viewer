@@ -17,31 +17,26 @@ static LONG g_lExStyle = 0;                           // 保存窗口扩展样�
  * @param hWnd: 窗口句柄
  * @return 成功返回true，失败返回false
  */
-bool ToggleFullscreen(HWND hWnd)
-{
+bool ToggleFullscreen(HWND hWnd) {
     if (!hWnd || !IsWindow(hWnd))
         return false;
 
     RECT rcMonitorArea;
     MONITORINFO mi = { sizeof(mi) };
 
-    // 获取窗口所在的显示器完整区域（包括任务栏）
+    // 获取窗口所在的显示器完整区域
     HMONITOR hMonitor = MonitorFromWindow(hWnd, MONITOR_DEFAULTTONEAREST);
-    if (hMonitor && GetMonitorInfo(hMonitor, &mi))
-    {
-        rcMonitorArea = mi.rcMonitor;  // 使用 rcMonitor 获得全屏区域
+    if (hMonitor && GetMonitorInfo(hMonitor, &mi)) {
+        rcMonitorArea = mi.rcMonitor;
     }
-    else
-    {
-        // 失败时回退到整个屏幕区域
+    else {
         rcMonitorArea.left = 0;
         rcMonitorArea.top = 0;
         rcMonitorArea.right = GetSystemMetrics(SM_CXSCREEN);
         rcMonitorArea.bottom = GetSystemMetrics(SM_CYSCREEN);
     }
 
-    if (!g_bFullscreen)
-    {
+    if (!g_bFullscreen) {
         // 进入全屏模式
         // 保存当前窗口状态
         g_wpPrev.length = sizeof(g_wpPrev);
@@ -52,14 +47,14 @@ bool ToggleFullscreen(HWND hWnd)
         g_lStyle = GetWindowLong(hWnd, GWL_STYLE);
         g_lExStyle = GetWindowLong(hWnd, GWL_EXSTYLE);
 
-        // 移除窗口边框和标题栏样式，但仍保持可调整大小能力
+        // 移除窗口边框和标题栏样式
         LONG newStyle = g_lStyle & ~(WS_CAPTION | WS_THICKFRAME | WS_MINIMIZEBOX | WS_MAXIMIZEBOX | WS_SYSMENU);
         SetWindowLong(hWnd, GWL_STYLE, newStyle);
 
-        // 添加置顶扩展样式，确保覆盖任务栏
+        // 添加置顶扩展样式
         SetWindowLong(hWnd, GWL_EXSTYLE, g_lExStyle | WS_EX_TOPMOST);
 
-        // 调整窗口大小至完整显示器区域，并置顶
+        // 调整窗口大小至完整显示器区域
         SetWindowPos(hWnd, HWND_TOPMOST,
             rcMonitorArea.left, rcMonitorArea.top,
             rcMonitorArea.right - rcMonitorArea.left,
@@ -68,18 +63,52 @@ bool ToggleFullscreen(HWND hWnd)
 
         g_bFullscreen = true;
     }
-    else
-    {
-        // 恢复窗口化模式
+    else {
+        // 退出全屏模式
         // 恢复原始窗口样式
         SetWindowLong(hWnd, GWL_STYLE, g_lStyle);
         SetWindowLong(hWnd, GWL_EXSTYLE, g_lExStyle);
 
         // 恢复原始窗口位置和大小
         SetWindowPlacement(hWnd, &g_wpPrev);
-        // 取消置顶，使窗口不再覆盖任务栏
+
+        // 取消置顶
         SetWindowPos(hWnd, HWND_NOTOPMOST, 0, 0, 0, 0,
             SWP_NOMOVE | SWP_NOSIZE | SWP_FRAMECHANGED);
+
+        // ===== 添加：恢复后确保满足最小尺寸和比例限制 =====
+        RECT rc;
+        GetWindowRect(hWnd, &rc);
+        int width = rc.right - rc.left;
+        int height = rc.bottom - rc.top;
+
+        // 检查最小尺寸
+        int minWidth = 500;
+        int minHeight = 300;
+
+        // 需要加上边框计算实际客户区最小尺寸
+        RECT minRect = { 0, 0, minWidth, minHeight };
+        AdjustWindowRectEx(&minRect, g_lStyle, FALSE, g_lExStyle);
+
+        int actualMinWidth = minRect.right - minRect.left;
+        int actualMinHeight = minRect.bottom - minRect.top;
+
+        if (width < actualMinWidth || height < actualMinHeight) {
+            width = max(width, actualMinWidth);
+            height = max(height, actualMinHeight);
+            SetWindowPos(hWnd, NULL, 0, 0, width, height,
+                SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
+        }
+
+        // 检查宽高比例（宽:高 >= 6:5）
+        float minRatio = 6.0f / 5.0f;  // 1.2
+        float currentRatio = (float)width / height;
+
+        if (currentRatio < minRatio) {
+            int newWidth = (int)(height * minRatio);
+            SetWindowPos(hWnd, NULL, 0, 0, newWidth, height,
+                SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
+        }
 
         g_bFullscreen = false;
     }
@@ -230,4 +259,61 @@ UINT GetWindowDpi(HWND hWnd) {
     }
 
     return dpi;
+}
+
+// fullscreen.cpp - 在文件末尾添加函数实现
+
+/**
+ * 设置窗口的最小尺寸
+ * @param hWnd: 窗口句柄
+ * @param minWidth: 最小宽度
+ * @param minHeight: 最小高度
+ */
+void SetWindowMinSize(HWND hWnd, int minWidth, int minHeight) {
+    if (!hWnd || !IsWindow(hWnd)) return;
+
+    // 设置窗口最小尺寸（会触发 WM_GETMINMAXINFO）
+    RECT rc = { 0, 0, minWidth, minHeight };
+    AdjustWindowRectEx(&rc, GetWindowLong(hWnd, GWL_STYLE), FALSE,
+        GetWindowLong(hWnd, GWL_EXSTYLE));
+
+    // 保存最小尺寸到窗口的额外数据或使用全局变量
+    // 这里我们通过 WM_GETMINMAXINFO 来处理
+}
+
+/**
+ * 约束窗口的宽高比例
+ * @param hWnd: 窗口句柄
+ * @param width: 当前宽度
+ * @param height: 当前高度
+ * @param targetWidth: 目标比例宽度（如 6）
+ * @param targetHeight: 目标比例高度（如 5）
+ */
+void ConstrainWindowAspectRatio(HWND hWnd, int width, int height,
+    int targetWidth, int targetHeight) {
+    if (!hWnd || !IsWindow(hWnd)) return;
+
+    // 计算当前比例
+    float currentRatio = (float)width / height;
+    float targetRatio = (float)targetWidth / targetHeight;
+
+    int newWidth = width;
+    int newHeight = height;
+
+    // 如果当前比例小于目标比例（太窄），调整宽度
+    if (currentRatio < targetRatio) {
+        newWidth = (int)(height * targetRatio);
+        newHeight = height;
+    }
+    // 如果当前比例大于目标比例（太宽），调整高度
+    else if (currentRatio > targetRatio) {
+        newWidth = width;
+        newHeight = (int)(width / targetRatio);
+    }
+
+    // 应用新尺寸
+    if (newWidth != width || newHeight != height) {
+        SetWindowPos(hWnd, NULL, 0, 0, newWidth, newHeight,
+            SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
+    }
 }

@@ -354,7 +354,7 @@ int WINAPI wWinMain(_In_ HINSTANCE hInstance,
     hMainWindow = CreateWindowExW(
         WS_EX_APPWINDOW,
         CLASS_NAME,
-        L"全屏时间显示器",
+        L"时间显示器",
         WS_OVERLAPPEDWINDOW,
         CW_USEDEFAULT, CW_USEDEFAULT, 800, 600,
         nullptr, nullptr, hInstance, nullptr);
@@ -362,6 +362,20 @@ int WINAPI wWinMain(_In_ HINSTANCE hInstance,
     if (!hMainWindow) {
         MessageBoxW(nullptr, L"主窗口创建失败！", L"错误", MB_ICONERROR);
         return 1;
+    }
+
+    RECT rc;
+    GetWindowRect(hMainWindow, &rc);
+    int width = rc.right - rc.left;
+    int height = rc.bottom - rc.top;
+
+    float minRatio = 6.0f / 5.0f;
+    float currentRatio = (float)width / height;
+
+    if (currentRatio < minRatio) {
+        int newWidth = (int)(height * minRatio);
+        SetWindowPos(hMainWindow, NULL, rc.left, rc.top, newWidth, height,
+            SWP_NOZORDER | SWP_NOACTIVATE);
     }
 
     // 设置窗口圆角
@@ -428,6 +442,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) 
     switch (message) {
     case WM_CREATE: {
         CreateControls(hWnd);
+        SetWindowMinSize(hWnd, 550, 300);
         break;
     }
 
@@ -454,19 +469,73 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) 
     }
     // ===== DPI处理结束 =====
 
-    case WM_SIZE: {
-        // 重新创建字体以适应新窗口大小
-        CreateDynamicFonts(hWnd);
+    // ===== 添加：处理窗口大小调整过程中的比例限制 =====
+    case WM_SIZING: {
+        // wParam: 拖动边缘的方向
+        // lParam: 指向 RECT 结构的指针，包含新窗口位置和大小
 
-        // 重绘窗口
+        RECT* pRect = (RECT*)lParam;
+        int newWidth = pRect->right - pRect->left;
+        int newHeight = pRect->bottom - pRect->top;
+
+        // 1. 首先确保不小于最小尺寸（宽550，高300）
+        int minWidth = 550;
+        int minHeight = 300;
+
+        if (newWidth < minWidth) {
+            if (wParam == WMSZ_LEFT || wParam == WMSZ_BOTTOMLEFT ||
+                wParam == WMSZ_TOPLEFT) {
+                // 调整左边框时，修改 left 而不是 right
+                pRect->left = pRect->right - minWidth;
+            }
+            else {
+                pRect->right = pRect->left + minWidth;
+            }
+            newWidth = minWidth;
+        }
+
+        if (newHeight < minHeight) {
+            if (wParam == WMSZ_TOP || wParam == WMSZ_TOPLEFT ||
+                wParam == WMSZ_TOPRIGHT) {
+                // 调整上边框时，修改 top 而不是 bottom
+                pRect->top = pRect->bottom - minHeight;
+            }
+            else {
+                pRect->bottom = pRect->top + minHeight;
+            }
+            newHeight = minHeight;
+        }
+        // 2. 应用宽高比例限制（横方向最小比例6:5，即宽:高 >= 6:5）
+        float minRatio = 6.0f / 5.0f;  // 1.2
+        float currentRatio = (float)newWidth / newHeight;
+
+        // 如果当前比例小于最小比例（太窄），需要调整
+        if (currentRatio < minRatio) {
+            int targetWidth = (int)(newHeight * minRatio);
+
+            // 根据拖动的边缘决定修改哪一侧
+            if (wParam == WMSZ_LEFT || wParam == WMSZ_BOTTOMLEFT ||
+                wParam == WMSZ_TOPLEFT) {
+                pRect->left = pRect->right - targetWidth;
+            }
+            else if (wParam == WMSZ_RIGHT || wParam == WMSZ_BOTTOMRIGHT ||
+                wParam == WMSZ_TOPRIGHT) {
+                pRect->right = pRect->left + targetWidth;
+            }
+        }
+
+        return TRUE;  // 消息已处理
+    }
+
+    case WM_SIZE: {
+        CreateDynamicFonts(hWnd);
         InvalidateRect(hWnd, NULL, TRUE);
 
-        // 更新三个按钮的位置
         if (hFullscreenBtn && hExitBtn && hSyncBtn) {
             RECT clientRect;
             GetClientRect(hWnd, &clientRect);
 
-            // ===== 使用DPI缩放计算按钮位置 =====
+            // 使用DPI缩放计算按钮位置
             UINT dpi = GetWindowDpi(hWnd);
             float scaleFactor = dpi / 96.0f;
 
@@ -476,7 +545,6 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) 
             int spacing = (int)(20 * scaleFactor);
             int totalWidth = btnWidth * 3 + spacing * 2;
             int startX = max(0, (clientRect.right - totalWidth) / 2);
-            // =================================
 
             SetWindowPos(hFullscreenBtn, NULL,
                 startX, btnY, btnWidth, btnHeight, SWP_NOZORDER);
@@ -593,8 +661,17 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) 
 
     case WM_GETMINMAXINFO: {
         LPMINMAXINFO lpMMI = (LPMINMAXINFO)lParam;
-        lpMMI->ptMinTrackSize.x = 500;
-        lpMMI->ptMinTrackSize.y = 400;
+
+        // 设置最小尺寸（宽550，高300）
+        // 注意：这里设置的是窗口的客户区尺寸，需要加上边框
+        RECT rc = { 0, 0, 550, 300 };
+        AdjustWindowRectEx(&rc, GetWindowLong(hWnd, GWL_STYLE), FALSE,
+            GetWindowLong(hWnd, GWL_EXSTYLE));
+
+        lpMMI->ptMinTrackSize.x = rc.right - rc.left;
+        lpMMI->ptMinTrackSize.y = rc.bottom - rc.top;
+
+        // 调用原有的处理函数（如果存在）
         HandleGetMinMaxInfo(lParam);
         break;
     }

@@ -15,3 +15,5 @@ void HandleGetMinMaxInfo(LPARAM lParam);
 void InitializeFullscreenModule(HWND hWnd);
 void CleanupFullscreenModule();
 UINT GetWindowDpi(HWND hWnd);
+void SetWindowMinSize(HWND hWnd, int minWidth, int minHeight);
+void ConstrainWindowAspectRatio(HWND hWnd, int width, int height, int targetWidth, int targetHeight);
