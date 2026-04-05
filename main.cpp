@@ -39,6 +39,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam);
 HFONT hLargeFont = nullptr;     // 大字体用于时间显示
 HFONT hDateFont = nullptr;      // 日期字体
 HFONT hNormalFont = nullptr;    // 按钮字体
+HFONT hSourceFont = nullptr;    // 时间来源指示器字体（小字体）
 HWND hMainWindow = nullptr;     // 主窗口句柄
 HWND hFullscreenBtn = nullptr;  // 全屏按钮句柄
 HWND hExitBtn = nullptr;        // 退出按钮句柄
@@ -57,6 +58,7 @@ struct FontSizes {
     int date;
     int week;
     int button;
+    int source;      // 新增：时间来源字体大小
 };
 
 // ==================== 函数声明 ====================
@@ -71,6 +73,7 @@ FontSizes CalculateFontSizes(HWND hWnd);
 // ===== 时间源管理函数 =====
 int GetDisplayTime(SYSTEMTIME& st);
 std::wstring GetTimeDateStringEx();
+std::wstring GetTimeSourceString();       // 新增：获取时间来源文字
 
 // ==================== 函数实现 ====================
 
@@ -85,10 +88,18 @@ int GetDisplayTime(SYSTEMTIME& st) {
     return 0; // 本地时间
 }
 
-// 2. 生成显示字符串
+// 2. 获取时间来源文字（用于左上角显示）
+std::wstring GetTimeSourceString() {
+    if (g_hasNetworkTime) {
+        return L"🌐 网络时间";
+    }
+    return L"💻 本地时间";
+}
+
+// 3. 生成显示字符串
 std::wstring GetTimeDateStringEx() {
     SYSTEMTIME st;
-    int timeSource = GetDisplayTime(st);
+    GetDisplayTime(st);
 
     wchar_t timeStr[64];
     wsprintfW(timeStr, L"%02d:%02d:%02d\n%04d-%02d-%02d",
@@ -104,8 +115,6 @@ std::wstring GetTimeDateStringEx() {
     result += L"\n";
     result += weekdays[st.wDayOfWeek];
 
-    // result += (timeSource == 1) ? L" 🌐" : L" 💻";
-
     return result;
 }
 
@@ -114,7 +123,7 @@ std::wstring GetTimeDateString() {
     return GetTimeDateStringEx();
 }
 
-// 3. 动态字体创建函数
+// 4. 动态字体创建函数
 void CreateDynamicFonts(HWND hWnd) {
     FontSizes sizes = CalculateFontSizes(hWnd);
 
@@ -129,6 +138,10 @@ void CreateDynamicFonts(HWND hWnd) {
     if (hNormalFont) {
         DeleteObject(hNormalFont);
         hNormalFont = nullptr;
+    }
+    if (hSourceFont) {
+        DeleteObject(hSourceFont);
+        hSourceFont = nullptr;
     }
 
     hLargeFont = CreateFontW(
@@ -152,6 +165,14 @@ void CreateDynamicFonts(HWND hWnd) {
         CLEARTYPE_QUALITY, DEFAULT_PITCH, L"Segoe UI"
     );
 
+    // 创建时间来源指示器的小字体
+    hSourceFont = CreateFontW(
+        -sizes.source, 0, 0, 0, FW_NORMAL,
+        FALSE, FALSE, FALSE, DEFAULT_CHARSET,
+        OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+        CLEARTYPE_QUALITY, DEFAULT_PITCH, L"Segoe UI"
+    );
+
     if (hFullscreenBtn && hExitBtn && hSyncBtn) {
         HFONT hBtnFont = CreateFontW(
             -sizes.button, 0, 0, 0, FW_MEDIUM,
@@ -167,7 +188,7 @@ void CreateDynamicFonts(HWND hWnd) {
     }
 }
 
-// 4. 创建控件
+// 5. 创建控件
 void CreateControls(HWND hWnd) {
     RECT clientRect;
     GetClientRect(hWnd, &clientRect);
@@ -213,7 +234,7 @@ void CreateControls(HWND hWnd) {
     }
 }
 
-// 5. 触摸输入处理
+// 6. 触摸输入处理
 void HandleTouchInput(HWND hWnd, WPARAM wParam, LPARAM lParam) {
     UINT cInputs = LOWORD(wParam);
     PTOUCHINPUT pInputs = new TOUCHINPUT[cInputs];
@@ -246,7 +267,7 @@ void HandleTouchInput(HWND hWnd, WPARAM wParam, LPARAM lParam) {
     }
 }
 
-// 6. 启动异步同步
+// 7. 启动异步同步
 void StartSync(HWND hWnd) {
     if (g_syncing) return;
     g_syncing = true;
@@ -257,7 +278,7 @@ void StartSync(HWND hWnd) {
     g_syncThread = std::thread(SyncThreadProc, hWnd);
 }
 
-// 7. 同步线程函数
+// 8. 同步线程函数
 void SyncThreadProc(HWND hWnd) {
     bool success = SyncTimeOnce();
     if (!g_exitFlag) {
@@ -265,7 +286,7 @@ void SyncThreadProc(HWND hWnd) {
     }
 }
 
-// 8. 计算字体大小
+// 9. 计算字体大小
 FontSizes CalculateFontSizes(HWND hWnd) {
     RECT clientRect;
     GetClientRect(hWnd, &clientRect);
@@ -282,10 +303,14 @@ FontSizes CalculateFontSizes(HWND hWnd) {
     sizes.week = (int)(sizes.time * 0.3);
     sizes.week = max(15, min(sizes.week, (int)(windowHeight * 0.1)));
     sizes.button = 20;
+
+    // 时间来源字体：主时间字体的 1/5，最小10px，最大18px
+    sizes.source = max(10, min(18, (int)(sizes.time * 0.2)));
+
     return sizes;
 }
 
-// 9. 应用程序入口点
+// 10. 应用程序入口点
 int WINAPI wWinMain(_In_ HINSTANCE hInstance,
     _In_opt_ HINSTANCE hPrevInstance,
     _In_ LPWSTR lpCmdLine,
@@ -382,6 +407,7 @@ int WINAPI wWinMain(_In_ HINSTANCE hInstance,
     if (hLargeFont) DeleteObject(hLargeFont);
     if (hDateFont) DeleteObject(hDateFont);
     if (hNormalFont) DeleteObject(hNormalFont);
+    if (hSourceFont) DeleteObject(hSourceFont);
 
     g_exitFlag = true;
     if (g_syncThread.joinable()) {
@@ -394,7 +420,7 @@ int WINAPI wWinMain(_In_ HINSTANCE hInstance,
     return (int)msg.wParam;
 }
 
-// 10. 窗口过程函数
+// 11. 窗口过程函数
 LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) {
     switch (message) {
     case WM_CREATE: {
@@ -492,6 +518,24 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) 
         FillRect(memDC, &clientRect, hBrush);
         DeleteObject(hBrush);
 
+        // ===== 绘制时间来源指示器（左上角）=====
+        std::wstring sourceText = GetTimeSourceString();
+        if (!sourceText.empty()) {
+            RECT sourceRect = clientRect;
+            sourceRect.left = 12;      // 左边距12px
+            sourceRect.top = 8;        // 上边距8px
+            sourceRect.right = clientRect.right - 12;
+            sourceRect.bottom = sourceRect.top + 30;
+
+            HGDIOBJ hOldSourceFont = SelectObject(memDC, hSourceFont);
+            SetTextColor(memDC, RGB(140, 140, 160));  // 灰色，低调显示
+            SetBkMode(memDC, TRANSPARENT);
+            DrawTextW(memDC, sourceText.c_str(), -1, &sourceRect,
+                DT_LEFT | DT_TOP | DT_NOPREFIX | DT_SINGLELINE);
+            SelectObject(memDC, hOldSourceFont);
+        }
+
+        // 获取时间字符串
         std::wstring timeDateStr = GetTimeDateString();
         size_t firstNewLine = timeDateStr.find(L'\n');
         size_t secondNewLine = timeDateStr.find(L'\n', firstNewLine + 1);
@@ -543,9 +587,20 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) 
         if (wParam == 1) {
             // 每秒刷新时间显示
             static std::wstring lastTimeStr;
+            static std::wstring lastSourceStr;
             std::wstring currentStr = GetTimeDateString();
+            std::wstring currentSource = GetTimeSourceString();
+
+            bool needRedraw = false;
             if (currentStr != lastTimeStr) {
                 lastTimeStr = currentStr;
+                needRedraw = true;
+            }
+            if (currentSource != lastSourceStr) {
+                lastSourceStr = currentSource;
+                needRedraw = true;
+            }
+            if (needRedraw) {
                 InvalidateRect(hWnd, NULL, FALSE);
             }
         }
@@ -555,7 +610,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) 
             KillTimer(hWnd, 2);
         }
         else if (wParam == TIMER_AUTO_SYNC) {
-            // 每小时自动同步一次（复用StartSync，会发送WM_NTP_SYNC_FINISHED消息）
+            // 每小时自动同步一次
             if (!g_syncing) {
                 StartSync(hWnd);
             }
@@ -620,7 +675,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) 
                 g_networkTime = ntpHour;
                 g_hasNetworkTime = true;
                 SetWindowTextW(hSyncBtn, L"同步成功");
-                // 立即刷新界面，显示网络时间
+                // 立即刷新界面，显示网络时间和新的来源指示器
                 InvalidateRect(hWnd, NULL, FALSE);
             }
             else {
