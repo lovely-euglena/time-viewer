@@ -133,7 +133,7 @@
       <LanguageStandard>stdcpp17</LanguageStandard>
       <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
       <AdditionalIncludeDirectories>$(SolutionDir);$(WindowsSDK_IncludePath);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
-      <Optimization>MaxSpeed</Optimization>
+      <Optimization>MinSpace</Optimization>
       <StringPooling>true</StringPooling>
       <FavorSizeOrSpeed>Size</FavorSizeOrSpeed>
       <DebugInformationFormat>None</DebugInformationFormat>
@@ -142,12 +142,13 @@
       <SubSystem>Windows</SubSystem>
       <EnableCOMDATFolding>true</EnableCOMDATFolding>
       <OptimizeReferences>true</OptimizeReferences>
-      <GenerateDebugInformation>true</GenerateDebugInformation>
+      <GenerateDebugInformation>false</GenerateDebugInformation>
       <AdditionalDependencies>dwmapi.lib;ws2_32.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <EntryPointSymbol>wWinMainCRTStartup</EntryPointSymbol>
       <TargetName>TimeDisplay</TargetName>
       <OutputFile>$(OutDir)TimeDisplay.exe</OutputFile>
       <LinkTimeCodeGeneration>UseLinkTimeCodeGeneration</LinkTimeCodeGeneration>
+      <GenerateWindowsMetadata>true</GenerateWindowsMetadata>
     </Link>
     <PostBuildEvent>
       <Command>signtool sign /f "$(ProjectDir)certificate.pfx" /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 "$(TargetPath)"</Command>
@@ -192,21 +193,24 @@
       <LanguageStandard>stdcpp17</LanguageStandard>
       <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
       <AdditionalIncludeDirectories>$(SolutionDir);$(WindowsSDK_IncludePath);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
-      <Optimization>MaxSpeed</Optimization>
+      <Optimization>MinSpace</Optimization>
       <StringPooling>true</StringPooling>
+      <FavorSizeOrSpeed>Size</FavorSizeOrSpeed>
+      <DebugInformationFormat>None</DebugInformationFormat>
     </ClCompile>
     <Link>
       <SubSystem>Windows</SubSystem>
       <EnableCOMDATFolding>true</EnableCOMDATFolding>
       <OptimizeReferences>true</OptimizeReferences>
-      <GenerateDebugInformation>true</GenerateDebugInformation>
+      <GenerateDebugInformation>false</GenerateDebugInformation>
       <AdditionalDependencies>dwmapi.lib;ws2_32.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <EntryPointSymbol>wWinMainCRTStartup</EntryPointSymbol>
       <TargetName>TimeDisplay</TargetName>
       <OutputFile>$(OutDir)TimeDisplay.exe</OutputFile>
+      <GenerateWindowsMetadata>true</GenerateWindowsMetadata>
     </Link>
     <PostBuildEvent>
-      <Command />
+      <Command>signtool sign /f "$(ProjectDir)certificate.pfx" /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 "$(TargetPath)"</Command>
     </PostBuildEvent>
     <PreBuildEvent>
       <Command />
