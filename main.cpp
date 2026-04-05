@@ -104,7 +104,7 @@ std::wstring GetTimeDateStringEx() {
     result += L"\n";
     result += weekdays[st.wDayOfWeek];
 
-    result += (timeSource == 1) ? L" 🌐" : L" 💻";
+    // result += (timeSource == 1) ? L" 🌐" : L" 💻";
 
     return result;
 }
