@@ -25,6 +25,9 @@
 #define ID_EXIT_BTN        1002
 #define ID_SYNC_BTN        1003
 
+#define BTN_NORMAL_COLOR RGB(220, 220, 255)
+#define BTN_DISABLED_COLOR RGB(140, 140, 160)
+
 // 自定义消息：NTP同步完成
 #define WM_NTP_SYNC_FINISHED (WM_USER + 100)
 
@@ -237,20 +240,17 @@ void HandleTouchInput(HWND hWnd, WPARAM wParam, LPARAM lParam) {
 
 // 5. 启动异步同步
 void StartSync(HWND hWnd) {
-    if (g_syncing) return; // 已经在同步中
+    if (g_syncing) return;
     g_syncing = true;
 
-    // 修改按钮文本为“同步中”
-    SetWindowTextW(hSyncBtn, L"同步中");
+    SetWindowTextW(hSyncBtn, L"同步中...");
 
-    // 如果已有线程，等待其结束（正常情况下不会发生）
     if (g_syncThread.joinable()) {
         g_syncThread.join();
     }
-
-    // 创建新线程
     g_syncThread = std::thread(SyncThreadProc, hWnd);
 }
+
 
 // 6. 同步线程函数
 void SyncThreadProc(HWND hWnd) {
@@ -300,6 +300,14 @@ FontSizes CalculateFontSizes(HWND hWnd) {
     return sizes;
 }
 
+void SetButtonColor(HWND hBtn, COLORREF textColor) {
+    HDC hdc = GetDC(hBtn);
+    SetTextColor(hdc, textColor);
+    SetBkMode(hdc, TRANSPARENT);
+    ReleaseDC(hBtn, hdc);
+    InvalidateRect(hBtn, NULL, TRUE);
+}
+
 // 8. 应用程序入口点
 int WINAPI wWinMain(_In_ HINSTANCE hInstance,
     _In_opt_ HINSTANCE hPrevInstance,
@@ -334,8 +342,11 @@ int WINAPI wWinMain(_In_ HINSTANCE hInstance,
     // 注册窗口类
     const wchar_t CLASS_NAME[] = L"Windows11StyleClockClass";
 
-    WNDCLASSEXW wcex = {};
-    wcex.cbSize = sizeof(WNDCLASSEX);
+    // 先注销可能存在的同名类
+    UnregisterClassW(CLASS_NAME, hInstance);
+    
+    WNDCLASSEXW wcex = { 0 };  // 全部初始化为 0
+    wcex.cbSize = sizeof(wcex);  // 关键：使用变量自身的大小
     wcex.style = CS_HREDRAW | CS_VREDRAW;
     wcex.lpfnWndProc = WndProc;
     wcex.hInstance = hInstance;
@@ -346,7 +357,11 @@ int WINAPI wWinMain(_In_ HINSTANCE hInstance,
     wcex.hIconSm = LoadIconW(hInstance, MAKEINTRESOURCE(101));
 
     if (!RegisterClassExW(&wcex)) {
-        MessageBoxW(nullptr, L"窗口类注册失败！", L"错误", MB_ICONERROR);
+        DWORD err = GetLastError();
+        wchar_t msg[256];
+        wsprintfW(msg, L"窗口类注册失败！\n错误码: %lu\ncbSize: %u",
+            err, wcex.cbSize);
+        MessageBoxW(nullptr, msg, L"错误", MB_ICONERROR);
         return 1;
     }
 
@@ -464,7 +479,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) 
         CreateDynamicFonts(hWnd);
 
         // 强制重绘
-        InvalidateRect(hWnd, NULL, TRUE);
+        InvalidateRect(hWnd, NULL, FALSE);
         return 0;
     }
     // ===== DPI处理结束 =====
@@ -529,7 +544,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) 
 
     case WM_SIZE: {
         CreateDynamicFonts(hWnd);
-        InvalidateRect(hWnd, NULL, TRUE);
+        InvalidateRect(hWnd, NULL, FALSE);
 
         if (hFullscreenBtn && hExitBtn && hSyncBtn) {
             RECT clientRect;
@@ -562,7 +577,26 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) 
 
         RECT clientRect;
         GetClientRect(hWnd, &clientRect);
+        int width = clientRect.right - clientRect.left;
+        int height = clientRect.bottom - clientRect.top;
 
+        // 如果窗口尺寸无效，直接返回
+        if (width <= 0 || height <= 0) {
+            EndPaint(hWnd, &ps);
+            break;
+        }
+
+        // 创建内存 DC（双缓冲）
+        HDC memDC = CreateCompatibleDC(hdc);
+        HBITMAP memBitmap = CreateCompatibleBitmap(hdc, width, height);
+        HBITMAP oldBitmap = (HBITMAP)SelectObject(memDC, memBitmap);
+
+        // 1. 绘制背景（深色）
+        HBRUSH hBrush = CreateSolidBrush(RGB(10, 10, 20));
+        FillRect(memDC, &clientRect, hBrush);
+        DeleteObject(hBrush);
+
+        // 2. 获取并解析时间字符串
         std::wstring timeDateStr = GetTimeDateString();
 
         size_t firstNewLine = timeDateStr.find(L'\n');
@@ -572,6 +606,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) 
         std::wstring dateStr = timeDateStr.substr(firstNewLine + 1, secondNewLine - firstNewLine - 1);
         std::wstring weekStr = timeDateStr.substr(secondNewLine + 1);
 
+        // 3. 计算布局位置
         int windowHeight = clientRect.bottom - clientRect.top;
         int timeHeight = windowHeight / 3;
         int dateHeight = windowHeight / 8;
@@ -580,48 +615,69 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) 
         int totalHeight = timeHeight + dateHeight + weekHeight + 20;
         int startY = (windowHeight - totalHeight) / 2 - 20;
 
-        // 绘制时间
+        // 4. 绘制时间
         RECT timeRect = clientRect;
         timeRect.top = startY;
         timeRect.bottom = startY + timeHeight;
 
-        HGDIOBJ hOldFont = SelectObject(hdc, hLargeFont);
-        SetTextColor(hdc, RGB(220, 220, 255));
-        SetBkMode(hdc, TRANSPARENT);
+        HGDIOBJ hOldFont = SelectObject(memDC, hLargeFont);
+        SetTextColor(memDC, RGB(220, 220, 255));
+        SetBkMode(memDC, TRANSPARENT);
 
-        DrawTextW(hdc, timeStr.c_str(), -1, &timeRect,
+        DrawTextW(memDC, timeStr.c_str(), -1, &timeRect,
             DT_CENTER | DT_VCENTER | DT_NOPREFIX | DT_SINGLELINE);
 
-        // 绘制日期
+        // 5. 绘制日期
         RECT dateRect = clientRect;
         dateRect.top = startY + timeHeight + 10;
         dateRect.bottom = dateRect.top + dateHeight;
 
-        HGDIOBJ hOldDateFont = SelectObject(hdc, hDateFont);
-        SetTextColor(hdc, RGB(200, 200, 240));
+        HGDIOBJ hOldDateFont = SelectObject(memDC, hDateFont);
+        SetTextColor(memDC, RGB(200, 200, 240));
 
-        DrawTextW(hdc, dateStr.c_str(), -1, &dateRect,
+        DrawTextW(memDC, dateStr.c_str(), -1, &dateRect,
             DT_CENTER | DT_VCENTER | DT_NOPREFIX | DT_SINGLELINE);
 
-        // 绘制星期
+        // 6. 绘制星期
         RECT weekRect = clientRect;
         weekRect.top = dateRect.bottom + 10;
         weekRect.bottom = weekRect.top + weekHeight;
 
-        SetTextColor(hdc, RGB(180, 180, 220));
-        DrawTextW(hdc, weekStr.c_str(), -1, &weekRect,
+        SetTextColor(memDC, RGB(180, 180, 220));
+        DrawTextW(memDC, weekStr.c_str(), -1, &weekRect,
             DT_CENTER | DT_VCENTER | DT_NOPREFIX | DT_SINGLELINE);
 
-        SelectObject(hdc, hOldDateFont);
-        SelectObject(hdc, hOldFont);
+        // 恢复字体
+        SelectObject(memDC, hOldDateFont);
+        SelectObject(memDC, hOldFont);
+
+        // 7. 一次性将内存 DC 内容复制到屏幕
+        BitBlt(hdc, 0, 0, width, height, memDC, 0, 0, SRCCOPY);
+
+        // 8. 清理资源
+        SelectObject(memDC, oldBitmap);
+        DeleteObject(memBitmap);
+        DeleteDC(memDC);
 
         EndPaint(hWnd, &ps);
         break;
     }
 
+    // 在 WM_TIMER 中添加恢复文本的逻辑
     case WM_TIMER: {
         if (wParam == 1) {
-            InvalidateRect(hWnd, NULL, TRUE);
+            // 原有的时间刷新逻辑...
+            static std::wstring lastTimeStr;
+            std::wstring currentStr = GetTimeDateString();
+            if (currentStr != lastTimeStr) {
+                lastTimeStr = currentStr;
+                InvalidateRect(hWnd, NULL, FALSE);
+            }
+        }
+        else if (wParam == 2) {
+            // 恢复按钮文本
+            SetWindowTextW(hSyncBtn, L"同步时间");
+            KillTimer(hWnd, 2);
         }
         break;
     }
@@ -681,6 +737,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) 
         return 0;
     }
 
+     // 在 WM_NTP_SYNC_FINISHED 中恢复
     case WM_NTP_SYNC_FINISHED: {
         // 同步完成，wParam为1表示成功，0表示失败
         if (wParam == 1) {
@@ -689,7 +746,13 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) 
         else {
             SetWindowTextW(hSyncBtn, L"同步失败");
         }
+
+        // 恢复按钮为可用状态
+        EnableWindow(hSyncBtn, TRUE);
         g_syncing = false;
+
+        // 可选：3秒后恢复按钮文本为“同步时间”
+        SetTimer(hWnd, 2, 3000, NULL);  // 需要添加定时器处理
         break;
     }
 

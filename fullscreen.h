@@ -3,7 +3,6 @@
 #include <ws2tcpip.h>
 #include <windows.h>
 #include <winuser.h>
-#include "fullscreen.h"
 
 // 函数声明
 bool ToggleFullscreen(HWND hWnd);
