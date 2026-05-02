@@ -9,7 +9,7 @@
 #include <windows.h>
 #include <dwmapi.h>
 #include <commctrl.h>
-
+#include <shellapi.h>
 // 其余头文件
 #include <string>
 #include <thread>
@@ -223,30 +223,56 @@ void CreateControls(HWND hWnd) {
     int btnY = clientRect.bottom - btnHeight - (int)(20 * scaleFactor);
     int totalWidth = btnWidth * 3 + spacing * 2;
     int startX = (clientRect.right - totalWidth) / 2;
+    if (!g_noHotKeys) {
+        hFullscreenBtn = CreateWindowW(
+            L"BUTTON", L"全屏 (F11)",
+            WS_VISIBLE | WS_CHILD | BS_PUSHBUTTON | BS_FLAT,
+            startX, btnY, btnWidth, btnHeight,
+            hWnd, (HMENU)ID_FULLSCREEN_BTN,
+            (HINSTANCE)GetWindowLongPtr(hWnd, GWLP_HINSTANCE), NULL
+        );
 
-    hFullscreenBtn = CreateWindowW(
-        L"BUTTON", L"全屏 (F11)",
-        WS_VISIBLE | WS_CHILD | BS_PUSHBUTTON | BS_FLAT,
-        startX, btnY, btnWidth, btnHeight,
-        hWnd, (HMENU)ID_FULLSCREEN_BTN,
-        (HINSTANCE)GetWindowLongPtr(hWnd, GWLP_HINSTANCE), NULL
-    );
+        hExitBtn = CreateWindowW(
+            L"BUTTON", L"退出 (Esc)",
+            WS_VISIBLE | WS_CHILD | BS_PUSHBUTTON | BS_FLAT,
+            startX + btnWidth + spacing, btnY, btnWidth, btnHeight,
+            hWnd, (HMENU)ID_EXIT_BTN,
+            (HINSTANCE)GetWindowLongPtr(hWnd, GWLP_HINSTANCE), NULL
+        );
 
-    hExitBtn = CreateWindowW(
-        L"BUTTON", L"退出 (Esc)",
-        WS_VISIBLE | WS_CHILD | BS_PUSHBUTTON | BS_FLAT,
-        startX + btnWidth + spacing, btnY, btnWidth, btnHeight,
-        hWnd, (HMENU)ID_EXIT_BTN,
-        (HINSTANCE)GetWindowLongPtr(hWnd, GWLP_HINSTANCE), NULL
-    );
+        hSyncBtn = CreateWindowW(
+            L"BUTTON", L"同步时间 (F5)",
+            WS_VISIBLE | WS_CHILD | BS_PUSHBUTTON | BS_FLAT,
+            startX + (btnWidth + spacing) * 2, btnY, btnWidth, btnHeight,
+            hWnd, (HMENU)ID_SYNC_BTN,
+            (HINSTANCE)GetWindowLongPtr(hWnd, GWLP_HINSTANCE), NULL
+        );
+    }
+    else {
+        hFullscreenBtn = CreateWindowW(
+            L"BUTTON", L"全屏",
+            WS_VISIBLE | WS_CHILD | BS_PUSHBUTTON | BS_FLAT,
+            startX, btnY, btnWidth, btnHeight,
+            hWnd, (HMENU)ID_FULLSCREEN_BTN,
+            (HINSTANCE)GetWindowLongPtr(hWnd, GWLP_HINSTANCE), NULL
+        );
 
-    hSyncBtn = CreateWindowW(
-        L"BUTTON", L"同步时间 (F5)",
-        WS_VISIBLE | WS_CHILD | BS_PUSHBUTTON | BS_FLAT,
-        startX + (btnWidth + spacing) * 2, btnY, btnWidth, btnHeight,
-        hWnd, (HMENU)ID_SYNC_BTN,
-        (HINSTANCE)GetWindowLongPtr(hWnd, GWLP_HINSTANCE), NULL
-    );
+        hExitBtn = CreateWindowW(
+            L"BUTTON", L"退出",
+            WS_VISIBLE | WS_CHILD | BS_PUSHBUTTON | BS_FLAT,
+            startX + btnWidth + spacing, btnY, btnWidth, btnHeight,
+            hWnd, (HMENU)ID_EXIT_BTN,
+            (HINSTANCE)GetWindowLongPtr(hWnd, GWLP_HINSTANCE), NULL
+        );
+
+        hSyncBtn = CreateWindowW(
+            L"BUTTON", L"同步时间",
+            WS_VISIBLE | WS_CHILD | BS_PUSHBUTTON | BS_FLAT,
+            startX + (btnWidth + spacing) * 2, btnY, btnWidth, btnHeight,
+            hWnd, (HMENU)ID_SYNC_BTN,
+            (HINSTANCE)GetWindowLongPtr(hWnd, GWLP_HINSTANCE), NULL
+        );
+    }
 
     if (hNormalFont && hFullscreenBtn && hExitBtn && hSyncBtn) {
         SendMessageW(hFullscreenBtn, WM_SETFONT, (WPARAM)hNormalFont, TRUE);
