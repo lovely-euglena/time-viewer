@@ -30,7 +30,9 @@
 
 // 自动同步定时器ID
 #define TIMER_AUTO_SYNC     3
-#define AUTO_SYNC_INTERVAL  3600000  // 1小时 = 3600000毫秒
+// 注意：ntp_client.h 中已定义 AUTO_SYNC_INTERVAL 为 3600（秒），
+// 此处本宏用于毫秒，改名为 AUTO_SYNC_INTERVAL_MS 避免重定义警告
+#define AUTO_SYNC_INTERVAL_MS  3600000  // 1小时 = 3600000毫秒
 
 // 窗口过程函数声明
 LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam);
@@ -201,7 +203,7 @@ void CreateDynamicFonts(HWND hWnd) {
     }
 }
 
-// 5. 创建控件
+// 5. 创建控件（已移除 WS_TABSTOP，避免按钮抢键盘焦点）
 void CreateControls(HWND hWnd) {
     RECT clientRect;
     GetClientRect(hWnd, &clientRect);
@@ -218,7 +220,7 @@ void CreateControls(HWND hWnd) {
 
     hFullscreenBtn = CreateWindowW(
         L"BUTTON", L"全屏 (F11)",
-        WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_PUSHBUTTON | BS_FLAT,
+        WS_VISIBLE | WS_CHILD | BS_PUSHBUTTON | BS_FLAT,
         startX, btnY, btnWidth, btnHeight,
         hWnd, (HMENU)ID_FULLSCREEN_BTN,
         (HINSTANCE)GetWindowLongPtr(hWnd, GWLP_HINSTANCE), NULL
@@ -226,7 +228,7 @@ void CreateControls(HWND hWnd) {
 
     hExitBtn = CreateWindowW(
         L"BUTTON", L"退出 (Esc)",
-        WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_PUSHBUTTON | BS_FLAT,
+        WS_VISIBLE | WS_CHILD | BS_PUSHBUTTON | BS_FLAT,
         startX + btnWidth + spacing, btnY, btnWidth, btnHeight,
         hWnd, (HMENU)ID_EXIT_BTN,
         (HINSTANCE)GetWindowLongPtr(hWnd, GWLP_HINSTANCE), NULL
@@ -234,7 +236,7 @@ void CreateControls(HWND hWnd) {
 
     hSyncBtn = CreateWindowW(
         L"BUTTON", L"同步时间",
-        WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_PUSHBUTTON | BS_FLAT,
+        WS_VISIBLE | WS_CHILD | BS_PUSHBUTTON | BS_FLAT,
         startX + (btnWidth + spacing) * 2, btnY, btnWidth, btnHeight,
         hWnd, (HMENU)ID_SYNC_BTN,
         (HINSTANCE)GetWindowLongPtr(hWnd, GWLP_HINSTANCE), NULL
@@ -405,7 +407,7 @@ int WINAPI wWinMain(_In_ HINSTANCE hInstance,
     StartSync(hMainWindow);
 
     // 设置自动同步定时器（1小时触发一次，由UI线程处理，保证线程安全）
-    SetTimer(hMainWindow, TIMER_AUTO_SYNC, AUTO_SYNC_INTERVAL, nullptr);
+    SetTimer(hMainWindow, TIMER_AUTO_SYNC, AUTO_SYNC_INTERVAL_MS, nullptr);
 
     // 设置时间刷新定时器（每秒）
     SetTimer(hMainWindow, 1, 1000, nullptr);
@@ -439,6 +441,14 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) 
     case WM_CREATE: {
         CreateControls(hWnd);
         SetWindowMinSize(hWnd, 550, 300);
+
+        // 注册全局热键（ESC 作为全局热键极易冲突，改为 Ctrl+Shift+Q 退出）
+        if (!RegisterHotKey(hWnd, 1, 0, VK_F11)) {
+            OutputDebugStringW(L"全局热键 F11 注册失败\n");
+        }
+        if (!RegisterHotKey(hWnd, 2, MOD_CONTROL | MOD_SHIFT, 'Q')) {
+            OutputDebugStringW(L"全局热键 Ctrl+Shift+Q 注册失败\n");
+        }
         break;
     }
 
@@ -646,6 +656,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) 
         break;
     }
 
+                   // 窗口焦点时的键盘快捷键（保留）
     case WM_KEYDOWN: {
         if (wParam == VK_F11) {
             ToggleFullscreen(hWnd);
@@ -680,6 +691,18 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) 
         return 0;
     }
 
+                 // 全局热键处理
+    case WM_HOTKEY: {
+        if (wParam == 1) {
+            ToggleFullscreen(hWnd);
+            SetWindowTextW(hFullscreenBtn, IsFullscreen() ? L"窗口化 (F11)" : L"全屏 (F11)");
+        }
+        else if (wParam == 2) {
+            PostMessage(hWnd, WM_CLOSE, 0, 0);
+        }
+        return 0;
+    }
+
     case WM_NTP_SYNC_FINISHED: {
         // 同步完成（无论是手动还是自动触发）
         if (wParam == 1) {
@@ -708,6 +731,8 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) 
     case WM_DESTROY: {
         KillTimer(hWnd, 1);
         KillTimer(hWnd, TIMER_AUTO_SYNC);
+        UnregisterHotKey(hWnd, 1);
+        UnregisterHotKey(hWnd, 2);
         PostQuitMessage(0);
         break;
     }
