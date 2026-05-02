@@ -449,6 +449,9 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) 
         if (!RegisterHotKey(hWnd, 2, MOD_CONTROL | MOD_SHIFT, 'Q')) {
             OutputDebugStringW(L"全局热键 Ctrl+Shift+Q 注册失败\n");
         }
+        if (!RegisterHotKey(hWnd, 3, 0, VK_F5)) {
+            OutputDebugStringW(L"全局热键 F5 注册失败\n");
+        }
         break;
     }
 
@@ -656,7 +659,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) 
         break;
     }
 
-                   // 窗口焦点时的键盘快捷键（保留）
+    // 窗口焦点时的键盘快捷键（保留）
     case WM_KEYDOWN: {
         if (wParam == VK_F11) {
             ToggleFullscreen(hWnd);
@@ -664,6 +667,9 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) 
         }
         else if (wParam == VK_ESCAPE) {
             PostMessage(hWnd, WM_CLOSE, 0, 0);
+        }
+        else if (wParam == VK_F5) {
+            StartSync(hWnd);
         }
         break;
     }
@@ -700,6 +706,9 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) 
         else if (wParam == 2) {
             PostMessage(hWnd, WM_CLOSE, 0, 0);
         }
+        else if (wParam == 3) {  // F5
+            StartSync(hWnd);
+        }
         return 0;
     }
 
@@ -733,6 +742,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) 
         KillTimer(hWnd, TIMER_AUTO_SYNC);
         UnregisterHotKey(hWnd, 1);
         UnregisterHotKey(hWnd, 2);
+        UnregisterHotKey(hWnd, 3);
         PostQuitMessage(0);
         break;
     }
