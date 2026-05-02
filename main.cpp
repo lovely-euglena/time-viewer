@@ -1,6 +1,6 @@
 ﻿// main.cpp
 // Windows 11风格时间显示主程序
-// 新增：透明度(-t)、置顶(-p)、置顶按钮(F6)
+// 修改：扩大最小尺寸，按钮字体基于按钮高度
 
 // 必须最先包含 winsock2.h，避免与 windows.h 冲突
 #include <winsock2.h>
@@ -25,7 +25,7 @@
 #define ID_FULLSCREEN_BTN  1001
 #define ID_EXIT_BTN        1002
 #define ID_SYNC_BTN        1003
-#define ID_TOPMOST_BTN     1004   // 新增：置顶按钮ID
+#define ID_TOPMOST_BTN     1004
 
 // 自定义消息：NTP同步完成
 #define WM_NTP_SYNC_FINISHED (WM_USER + 100)
@@ -38,32 +38,35 @@
 LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam);
 
 // 全局变量
-HFONT hLargeFont = nullptr;     // 大字体用于时间显示
-HFONT hDateFont = nullptr;      // 日期字体
-HFONT hNormalFont = nullptr;    // 按钮字体
-HFONT hSourceFont = nullptr;    // 时间来源指示器字体（小字体）
-HWND hMainWindow = nullptr;     // 主窗口句柄
-HWND hFullscreenBtn = nullptr;  // 全屏按钮句柄
-HWND hExitBtn = nullptr;        // 退出按钮句柄
-HWND hSyncBtn = nullptr;        // NTP同步按钮句柄
-HWND hTopmostBtn = nullptr;     // 新增：置顶按钮句柄
+HFONT hLargeFont = nullptr;
+HFONT hDateFont = nullptr;
+HFONT hNormalFont = nullptr;    // 实际用作按钮字体
+HFONT hSourceFont = nullptr;
+HWND hMainWindow = nullptr;
+HWND hFullscreenBtn = nullptr;
+HWND hExitBtn = nullptr;
+HWND hSyncBtn = nullptr;
+HWND hTopmostBtn = nullptr;
 
-std::atomic<bool> g_syncing{ false };   // 同步进行中标志
-std::atomic<bool> g_exitFlag{ false };  // 程序退出标志
-std::thread g_syncThread;               // 同步线程对象
+std::atomic<bool> g_syncing{ false };
+std::atomic<bool> g_exitFlag{ false };
+std::thread g_syncThread;
 
 // ===== 命令行参数标志 =====
-bool g_hideButtons = false;      // 是否隐藏按钮
-bool g_startFullscreen = false;  // 是否启动即全屏
-bool g_noHotKeys = false;        // 是否不注册热键
-int  g_transparency = 255;       // 新增：窗口透明度(0-255)，默认不透明
-bool g_startTopmost = false;     // 新增：启动时是否置顶
-bool g_topmost = false;          // 新增：当前置顶状态
+bool g_hideButtons = false;
+bool g_startFullscreen = false;
+bool g_noHotKeys = false;
+int  g_transparency = 255;
+bool g_startTopmost = false;
+bool g_topmost = false;
 
-// ===== 网络时间存储（永不过期，成功获取后一直使用）=====
-static SYSTEMTIME g_networkTime = { 0 };     // 最后一次成功同步的网络时间
-static bool g_hasNetworkTime = false;      // 是否已获取过有效的网络时间
-static ULONGLONG g_syncBaseTick = 0;  // 同步时刻的本地 TickCount (毫秒)
+// ===== 新增：按钮实际高度（用于字体计算） =====
+int g_buttonHeight = 40;        // 默认值，会在创建按钮时更新
+
+// ===== 网络时间存储 =====
+static SYSTEMTIME g_networkTime = { 0 };
+static bool g_hasNetworkTime = false;
+static ULONGLONG g_syncBaseTick = 0;
 
 struct FontSizes {
     int time;
@@ -73,37 +76,31 @@ struct FontSizes {
     int source;
 };
 
-// ==================== 函数声明 ====================
+// 函数声明
 std::wstring GetTimeDateString();
 void CreateControls(HWND hWnd);
 void HandleTouchInput(HWND hWnd, WPARAM wParam, LPARAM lParam);
 void CreateDynamicFonts(HWND hWnd);
-void StartSync(HWND hWnd);               // 启动异步同步
-void SyncThreadProc(HWND hWnd);          // 同步线程函数
+void StartSync(HWND hWnd);
+void SyncThreadProc(HWND hWnd);
 FontSizes CalculateFontSizes(HWND hWnd);
-void ToggleTopmost(HWND hWnd);           // 新增：切换置顶状态
+void ToggleTopmost(HWND hWnd);
 
-// ===== 时间源管理函数 =====
 int GetDisplayTime(SYSTEMTIME& st);
 std::wstring GetTimeDateStringEx();
-std::wstring GetTimeSourceString();       // 获取时间来源文字
+std::wstring GetTimeSourceString();
 
 // ==================== 函数实现 ====================
 
-// 1. 获取当前显示时间（网络时间优先，永不过期）
 int GetDisplayTime(SYSTEMTIME& st) {
     if (g_hasNetworkTime) {
-        // 计算流逝的毫秒数
         ULONGLONG elapsedMs = GetTickCount64() - g_syncBaseTick;
-        // 将网络时间转为 FILETIME（100纳秒单位）
         FILETIME ft;
         SystemTimeToFileTime(&g_networkTime, &ft);
         ULARGE_INTEGER uli;
         uli.LowPart = ft.dwLowDateTime;
         uli.HighPart = ft.dwHighDateTime;
-        // 加上流逝的时间（毫秒 → 100纳秒）
         uli.QuadPart += elapsedMs * 10000ULL;
-        // 转回 SYSTEMTIME
         ft.dwLowDateTime = uli.LowPart;
         ft.dwHighDateTime = uli.HighPart;
         FileTimeToSystemTime(&ft, &st);
@@ -113,15 +110,11 @@ int GetDisplayTime(SYSTEMTIME& st) {
     return 0;
 }
 
-// 2. 获取时间来源文字（用于左上角显示）
 std::wstring GetTimeSourceString() {
-    if (g_hasNetworkTime) {
-        return L"🌐 网络时间";
-    }
+    if (g_hasNetworkTime) return L"🌐 网络时间";
     return L"💻 本地时间";
 }
 
-// 3. 生成显示字符串
 std::wstring GetTimeDateStringEx() {
     SYSTEMTIME st;
     GetDisplayTime(st);
@@ -139,16 +132,13 @@ std::wstring GetTimeDateStringEx() {
     std::wstring result = timeStr;
     result += L"\n";
     result += weekdays[st.wDayOfWeek];
-
     return result;
 }
 
-// 兼容原有调用
 std::wstring GetTimeDateString() {
     return GetTimeDateStringEx();
 }
 
-// 4. 动态字体创建函数
 void CreateDynamicFonts(HWND hWnd) {
     FontSizes sizes = CalculateFontSizes(hWnd);
 
@@ -171,14 +161,7 @@ void CreateDynamicFonts(HWND hWnd) {
         CLEARTYPE_QUALITY, DEFAULT_PITCH, L"Segoe UI"
     );
 
-    hNormalFont = CreateFontW(
-        -sizes.week, 0, 0, 0, FW_NORMAL,
-        FALSE, FALSE, FALSE, DEFAULT_CHARSET,
-        OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
-        CLEARTYPE_QUALITY, DEFAULT_PITCH, L"Segoe UI"
-    );
-
-    // 创建时间来源指示器的小字体
+    // 按钮字体不再通过 hNormalFont 混合使用，直接创建专用字体
     hSourceFont = CreateFontW(
         -sizes.source, 0, 0, 0, FW_NORMAL,
         FALSE, FALSE, FALSE, DEFAULT_CHARSET,
@@ -186,10 +169,11 @@ void CreateDynamicFonts(HWND hWnd) {
         CLEARTYPE_QUALITY, DEFAULT_PITCH, L"Segoe UI"
     );
 
-    // 如果按钮存在，单独创建按钮字体并发送（现在有4个按钮）
+    // 按钮字体：基于 g_buttonHeight 计算，不受 sizes.button 影响
     if (hFullscreenBtn && hExitBtn && hSyncBtn && hTopmostBtn) {
+        int btnFontSize = max(12, (int)(g_buttonHeight * 0.5));  // 按钮高度的65%，最小12px
         HFONT hBtnFont = CreateFontW(
-            -sizes.button, 0, 0, 0, FW_MEDIUM,
+            -btnFontSize, 0, 0, 0, FW_MEDIUM,
             FALSE, FALSE, FALSE, DEFAULT_CHARSET,
             OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
             CLEARTYPE_QUALITY, DEFAULT_PITCH, L"Segoe UI"
@@ -198,30 +182,29 @@ void CreateDynamicFonts(HWND hWnd) {
         SendMessageW(hExitBtn, WM_SETFONT, (WPARAM)hBtnFont, TRUE);
         SendMessageW(hSyncBtn, WM_SETFONT, (WPARAM)hBtnFont, TRUE);
         SendMessageW(hTopmostBtn, WM_SETFONT, (WPARAM)hBtnFont, TRUE);
+        // 释放旧的 hNormalFont 并更新为新字体
         if (hNormalFont) DeleteObject(hNormalFont);
         hNormalFont = hBtnFont;
     }
 }
 
-// 5. 创建控件（包含置顶按钮，且根据 g_hideButtons 决定是否创建，4按钮布局）
 void CreateControls(HWND hWnd) {
-    if (g_hideButtons) return;   // 命令行要求不显示按钮
+    if (g_hideButtons) return;
 
     RECT clientRect;
     GetClientRect(hWnd, &clientRect);
-
     UINT dpi = GetWindowDpi(hWnd);
     float scaleFactor = dpi / 96.0f;
 
-    // 四个按钮的布局：宽度略窄以适应4个按钮
-    int btnWidth = (int)(105 * scaleFactor);   // 稍微缩小按钮宽度
-    int btnHeight = (int)(40 * scaleFactor);
-    int spacing = (int)(15 * scaleFactor);     // 间距也略缩小
+    int btnWidth = (int)(105 * scaleFactor);
+    int btnHeight = (int)(40 * scaleFactor);   // 按钮高度
+    g_buttonHeight = btnHeight;                // 保存实际高度
+
+    int spacing = (int)(15 * scaleFactor);
     int btnY = clientRect.bottom - btnHeight - (int)(20 * scaleFactor);
     int totalWidth = btnWidth * 4 + spacing * 3;
     int startX = (clientRect.right - totalWidth) / 2;
 
-    // 全屏按钮
     hFullscreenBtn = CreateWindowW(
         L"BUTTON", g_noHotKeys ? L"全屏" : L"全屏 (F11)",
         WS_VISIBLE | WS_CHILD | BS_PUSHBUTTON | BS_FLAT,
@@ -230,7 +213,6 @@ void CreateControls(HWND hWnd) {
         (HINSTANCE)GetWindowLongPtr(hWnd, GWLP_HINSTANCE), NULL
     );
 
-    // 退出按钮
     hExitBtn = CreateWindowW(
         L"BUTTON", g_noHotKeys ? L"退出" : L"退出 (Esc)",
         WS_VISIBLE | WS_CHILD | BS_PUSHBUTTON | BS_FLAT,
@@ -239,7 +221,6 @@ void CreateControls(HWND hWnd) {
         (HINSTANCE)GetWindowLongPtr(hWnd, GWLP_HINSTANCE), NULL
     );
 
-    // 同步按钮
     hSyncBtn = CreateWindowW(
         L"BUTTON", g_noHotKeys ? L"同步时间" : L"同步 (F5)",
         WS_VISIBLE | WS_CHILD | BS_PUSHBUTTON | BS_FLAT,
@@ -248,25 +229,17 @@ void CreateControls(HWND hWnd) {
         (HINSTANCE)GetWindowLongPtr(hWnd, GWLP_HINSTANCE), NULL
     );
 
-    // 置顶按钮（新增）
     hTopmostBtn = CreateWindowW(
-        L"BUTTON", g_topmost ? (g_noHotKeys ? L"取消置顶" : L"取消置顶 (F6)") : (g_noHotKeys ? L"置顶" : L"置顶 (F6)"),
+        L"BUTTON", g_topmost ? (g_noHotKeys ? L"取消置顶" : L"消顶 (F6)") : (g_noHotKeys ? L"置顶" : L"置顶 (F6)"),
         WS_VISIBLE | WS_CHILD | BS_PUSHBUTTON | BS_FLAT,
         startX + (btnWidth + spacing) * 3, btnY, btnWidth, btnHeight,
         hWnd, (HMENU)ID_TOPMOST_BTN,
         (HINSTANCE)GetWindowLongPtr(hWnd, GWLP_HINSTANCE), NULL
     );
 
-    // 设置字体
-    if (hNormalFont && hFullscreenBtn && hExitBtn && hSyncBtn && hTopmostBtn) {
-        SendMessageW(hFullscreenBtn, WM_SETFONT, (WPARAM)hNormalFont, TRUE);
-        SendMessageW(hExitBtn, WM_SETFONT, (WPARAM)hNormalFont, TRUE);
-        SendMessageW(hSyncBtn, WM_SETFONT, (WPARAM)hNormalFont, TRUE);
-        SendMessageW(hTopmostBtn, WM_SETFONT, (WPARAM)hNormalFont, TRUE);
-    }
+    // 设置字体：因为 hNormalFont 可能还没创建，这里先不设置，交给 WM_CREATE 后调用 CreateDynamicFonts
 }
 
-// 6. 触摸输入处理
 void HandleTouchInput(HWND hWnd, WPARAM wParam, LPARAM lParam) {
     UINT cInputs = LOWORD(wParam);
     PTOUCHINPUT pInputs = new TOUCHINPUT[cInputs];
@@ -300,19 +273,14 @@ void HandleTouchInput(HWND hWnd, WPARAM wParam, LPARAM lParam) {
     }
 }
 
-// 7. 启动异步同步
 void StartSync(HWND hWnd) {
     if (g_syncing) return;
     g_syncing = true;
-    if (hSyncBtn)
-        SetWindowTextW(hSyncBtn, L"同步中...");
-    if (g_syncThread.joinable()) {
-        g_syncThread.join();
-    }
+    if (hSyncBtn) SetWindowTextW(hSyncBtn, L"同步中...");
+    if (g_syncThread.joinable()) g_syncThread.join();
     g_syncThread = std::thread(SyncThreadProc, hWnd);
 }
 
-// 8. 同步线程函数
 void SyncThreadProc(HWND hWnd) {
     bool success = SyncTimeOnce();
     if (!g_exitFlag) {
@@ -320,7 +288,6 @@ void SyncThreadProc(HWND hWnd) {
     }
 }
 
-// 9. 计算字体大小
 FontSizes CalculateFontSizes(HWND hWnd) {
     RECT clientRect;
     GetClientRect(hWnd, &clientRect);
@@ -336,13 +303,12 @@ FontSizes CalculateFontSizes(HWND hWnd) {
     sizes.date = max(15, min(sizes.date, (int)(windowHeight * 0.12)));
     sizes.week = (int)(sizes.time * 0.3);
     sizes.week = max(15, min(sizes.week, (int)(windowHeight * 0.1)));
-    sizes.button = max(15, min(25, windowHeight / 25));
-    sizes.source = max(10, min(18, (int)(sizes.time * 0.2)));
-
+    // 按钮字体不再基于窗口高度，将在 CreateDynamicFonts 中直接使用 g_buttonHeight
+    sizes.button = 0;   // 未使用
+    sizes.source = max(10, min(8, (int)(sizes.time * 0.1)));
     return sizes;
 }
 
-// 10. 切换窗口置顶状态（新增功能）
 void ToggleTopmost(HWND hWnd) {
     g_topmost = !g_topmost;
     LONG exStyle = GetWindowLong(hWnd, GWL_EXSTYLE);
@@ -354,49 +320,42 @@ void ToggleTopmost(HWND hWnd) {
         SetWindowLong(hWnd, GWL_EXSTYLE, exStyle & ~WS_EX_TOPMOST);
         SetWindowPos(hWnd, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
     }
-    // 更新按钮文字
     if (hTopmostBtn) {
         SetWindowTextW(hTopmostBtn, g_topmost ?
-            (g_noHotKeys ? L"取消置顶" : L"取消置顶 (F6)") :
+            (g_noHotKeys ? L"取消置顶" : L"消顶 (F6)") :
             (g_noHotKeys ? L"置顶" : L"置顶 (F6)"));
     }
 }
 
-// 11. 应用程序入口点
+// 窗口最小尺寸常数（长宽）
+const int MIN_WINDOW_WIDTH = 600;
+const int MIN_WINDOW_HEIGHT = 400;
+
 int WINAPI wWinMain(_In_ HINSTANCE hInstance,
     _In_opt_ HINSTANCE hPrevInstance,
     _In_ LPWSTR lpCmdLine,
     _In_ int nCmdShow) {
 
-    // ---- 命令行参数解析（新增透明度与置顶）----
     int argc;
     LPWSTR* argv = CommandLineToArgvW(GetCommandLineW(), &argc);
     if (argv) {
         for (int i = 1; i < argc; ++i) {
-            if (wcscmp(argv[i], L"--no-button") == 0 || wcscmp(argv[i], L"-b") == 0) {
+            if (wcscmp(argv[i], L"--no-button") == 0 || wcscmp(argv[i], L"-b") == 0)
                 g_hideButtons = true;
-            }
-            else if (wcscmp(argv[i], L"--full-screen") == 0 || wcscmp(argv[i], L"-f") == 0) {
+            else if (wcscmp(argv[i], L"--full-screen") == 0 || wcscmp(argv[i], L"-f") == 0)
                 g_startFullscreen = true;
-            }
-            else if (wcscmp(argv[i], L"--nok-key") == 0 || wcscmp(argv[i], L"-k") == 0) {
+            else if (wcscmp(argv[i], L"--nok-key") == 0 || wcscmp(argv[i], L"-k") == 0)
                 g_noHotKeys = true;
-            }
-            else if (wcscmp(argv[i], L"--topmost") == 0 || wcscmp(argv[i], L"-p") == 0) {
+            else if (wcscmp(argv[i], L"--topmost") == 0 || wcscmp(argv[i], L"-p") == 0)
                 g_startTopmost = true;
-            }
             else if ((wcscmp(argv[i], L"--transparency") == 0 || wcscmp(argv[i], L"-t") == 0) && i + 1 < argc) {
                 int val = _wtoi(argv[++i]);
-                if (val >= 0 && val <= 255) {
-                    g_transparency = val;
-                }
-                // 若无效则保持默认255
+                if (val >= 0 && val <= 255) g_transparency = val;
             }
         }
         LocalFree(argv);
     }
 
-    // 设置DPI感知
     HMODULE hUser32 = LoadLibraryW(L"user32.dll");
     if (hUser32) {
         auto pSetProcessDpiAwarenessContext = (BOOL(WINAPI*)(DPI_AWARENESS_CONTEXT))GetProcAddress(hUser32, "SetProcessDpiAwarenessContext");
@@ -440,7 +399,7 @@ int WINAPI wWinMain(_In_ HINSTANCE hInstance,
     }
 
     hMainWindow = CreateWindowExW(
-        WS_EX_APPWINDOW | (g_transparency < 255 ? WS_EX_LAYERED : 0),  // 如果需要透明度，添加分层样式
+        WS_EX_APPWINDOW | (g_transparency < 255 ? WS_EX_LAYERED : 0),
         CLASS_NAME,
         L"时间显示器",
         WS_OVERLAPPEDWINDOW,
@@ -452,7 +411,6 @@ int WINAPI wWinMain(_In_ HINSTANCE hInstance,
         return 1;
     }
 
-    // 设置透明度（仅当值非255时应用）
     if (g_transparency < 255) {
         SetLayeredWindowAttributes(hMainWindow, 0, (BYTE)g_transparency, LWA_ALPHA);
     }
@@ -470,9 +428,8 @@ int WINAPI wWinMain(_In_ HINSTANCE hInstance,
     CreateDynamicFonts(hMainWindow);
     InitializeFullscreenModule(hMainWindow);
 
-    // 如果命令行要求启动即置顶
     if (g_startTopmost) {
-        g_topmost = true;                // 先设置标志，以便按钮文字正确
+        g_topmost = true;
         SetWindowLong(hMainWindow, GWL_EXSTYLE, GetWindowLong(hMainWindow, GWL_EXSTYLE) | WS_EX_TOPMOST);
         SetWindowPos(hMainWindow, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
     }
@@ -480,19 +437,13 @@ int WINAPI wWinMain(_In_ HINSTANCE hInstance,
     ShowWindow(hMainWindow, nCmdShow);
     UpdateWindow(hMainWindow);
 
-    // 如果命令行要求启动即全屏
     if (g_startFullscreen) {
         ToggleFullscreen(hMainWindow);
-        if (hFullscreenBtn)
-            SetWindowTextW(hFullscreenBtn, IsFullscreen() ? L"窗口化 (F11)" : L"全屏 (F11)");
+        if (hFullscreenBtn) SetWindowTextW(hFullscreenBtn, IsFullscreen() ? L"窗口化 (F11)" : L"全屏 (F11)");
     }
 
-    // 启动后立即手动同步一次（异步）
     StartSync(hMainWindow);
-
-    // 设置自动同步定时器（1小时触发一次）
     SetTimer(hMainWindow, TIMER_AUTO_SYNC, AUTO_SYNC_INTERVAL_MS, nullptr);
-    // 设置时间刷新定时器（每秒）
     SetTimer(hMainWindow, 1, 1000, nullptr);
 
     MSG msg = {};
@@ -501,16 +452,13 @@ int WINAPI wWinMain(_In_ HINSTANCE hInstance,
         DispatchMessageW(&msg);
     }
 
-    // 清理资源
     if (hLargeFont) DeleteObject(hLargeFont);
     if (hDateFont) DeleteObject(hDateFont);
     if (hNormalFont) DeleteObject(hNormalFont);
     if (hSourceFont) DeleteObject(hSourceFont);
 
     g_exitFlag = true;
-    if (g_syncThread.joinable()) {
-        g_syncThread.join();
-    }
+    if (g_syncThread.joinable()) g_syncThread.join();
 
     CleanupNTPClient();
     CleanupFullscreenModule();
@@ -518,20 +466,20 @@ int WINAPI wWinMain(_In_ HINSTANCE hInstance,
     return (int)msg.wParam;
 }
 
-// 12. 窗口过程函数
 LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) {
     switch (message) {
     case WM_CREATE: {
         CreateControls(hWnd);
-        SetWindowMinSize(hWnd, 550, 300);
+        SetWindowMinSize(hWnd, MIN_WINDOW_WIDTH, MIN_WINDOW_HEIGHT);
 
-        // 注册全局热键（除非被命令行禁用，新增F6）
         if (!g_noHotKeys) {
             RegisterHotKey(hWnd, 1, 0, VK_F11);
             RegisterHotKey(hWnd, 2, MOD_CONTROL | MOD_SHIFT, 'Q');
             RegisterHotKey(hWnd, 3, 0, VK_F5);
-            RegisterHotKey(hWnd, 4, 0, VK_F6);  // 新增：置顶热键
+            RegisterHotKey(hWnd, 4, 0, VK_F6);
         }
+        // 按钮创建后，再应用字体（确保 g_buttonHeight 已更新）
+        CreateDynamicFonts(hWnd);
         break;
     }
 
@@ -543,6 +491,8 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) 
             newRect->right - newRect->left,
             newRect->bottom - newRect->top,
             SWP_NOZORDER | SWP_NOACTIVATE);
+        // DPI改变后需要重新创建控件（更新按钮尺寸）
+        CreateControls(hWnd);
         CreateDynamicFonts(hWnd);
         InvalidateRect(hWnd, NULL, FALSE);
         return 0;
@@ -552,20 +502,18 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) 
         RECT* pRect = (RECT*)lParam;
         int newWidth = pRect->right - pRect->left;
         int newHeight = pRect->bottom - pRect->top;
-        int minWidth = 550;
-        int minHeight = 300;
 
-        if (newWidth < minWidth) {
+        if (newWidth < MIN_WINDOW_WIDTH) {
             if (wParam == WMSZ_LEFT || wParam == WMSZ_BOTTOMLEFT || wParam == WMSZ_TOPLEFT)
-                pRect->left = pRect->right - minWidth;
+                pRect->left = pRect->right - MIN_WINDOW_WIDTH;
             else
-                pRect->right = pRect->left + minWidth;
+                pRect->right = pRect->left + MIN_WINDOW_WIDTH;
         }
-        if (newHeight < minHeight) {
+        if (newHeight < MIN_WINDOW_HEIGHT) {
             if (wParam == WMSZ_TOP || wParam == WMSZ_TOPLEFT || wParam == WMSZ_TOPRIGHT)
-                pRect->top = pRect->bottom - minHeight;
+                pRect->top = pRect->bottom - MIN_WINDOW_HEIGHT;
             else
-                pRect->bottom = pRect->top + minHeight;
+                pRect->bottom = pRect->top + MIN_WINDOW_HEIGHT;
         }
 
         float minRatio = 6.0f / 5.0f;
@@ -581,17 +529,14 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) 
     }
 
     case WM_SIZE: {
-        CreateDynamicFonts(hWnd);
-        InvalidateRect(hWnd, NULL, FALSE);
-
-        // 重新布局四个按钮
+        // 重新调整按钮布局（按钮已在 WM_CREATE 或 WM_DPICHANGED 中创建）
         if (hFullscreenBtn && hExitBtn && hSyncBtn && hTopmostBtn) {
             RECT clientRect;
             GetClientRect(hWnd, &clientRect);
             UINT dpi = GetWindowDpi(hWnd);
             float scaleFactor = dpi / 96.0f;
             int btnWidth = (int)(105 * scaleFactor);
-            int btnHeight = (int)(40 * scaleFactor);
+            int btnHeight = g_buttonHeight;  // 使用已保存的按钮高度
             int spacing = (int)(15 * scaleFactor);
             int btnY = clientRect.bottom - btnHeight - (int)(20 * scaleFactor);
             int totalWidth = btnWidth * 4 + spacing * 3;
@@ -602,6 +547,9 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) 
             SetWindowPos(hSyncBtn, NULL, startX + (btnWidth + spacing) * 2, btnY, btnWidth, btnHeight, SWP_NOZORDER);
             SetWindowPos(hTopmostBtn, NULL, startX + (btnWidth + spacing) * 3, btnY, btnWidth, btnHeight, SWP_NOZORDER);
         }
+        // 重绘和字体刷新
+        CreateDynamicFonts(hWnd);
+        InvalidateRect(hWnd, NULL, FALSE);
         break;
     }
 
@@ -613,10 +561,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) 
         int width = clientRect.right - clientRect.left;
         int height = clientRect.bottom - clientRect.top;
 
-        if (width <= 0 || height <= 0) {
-            EndPaint(hWnd, &ps);
-            break;
-        }
+        if (width <= 0 || height <= 0) { EndPaint(hWnd, &ps); break; }
 
         HDC memDC = CreateCompatibleDC(hdc);
         HBITMAP memBitmap = CreateCompatibleBitmap(hdc, width, height);
@@ -626,15 +571,12 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) 
         FillRect(memDC, &clientRect, hBrush);
         DeleteObject(hBrush);
 
-        // 绘制时间来源指示器（左上角）
         std::wstring sourceText = GetTimeSourceString();
         if (!sourceText.empty()) {
             RECT sourceRect = clientRect;
-            sourceRect.left = 12;
-            sourceRect.top = 8;
+            sourceRect.left = 12; sourceRect.top = 8;
             sourceRect.right = clientRect.right - 12;
             sourceRect.bottom = sourceRect.top + 30;
-
             HGDIOBJ hOldSourceFont = SelectObject(memDC, hSourceFont);
             SetTextColor(memDC, RGB(140, 140, 160));
             SetBkMode(memDC, TRANSPARENT);
@@ -643,11 +585,9 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) 
             SelectObject(memDC, hOldSourceFont);
         }
 
-        // 获取时间字符串
         std::wstring timeDateStr = GetTimeDateString();
         size_t firstNewLine = timeDateStr.find(L'\n');
         size_t secondNewLine = timeDateStr.find(L'\n', firstNewLine + 1);
-
         std::wstring timeStr = timeDateStr.substr(0, firstNewLine);
         std::wstring dateStr = timeDateStr.substr(firstNewLine + 1, secondNewLine - firstNewLine - 1);
         std::wstring weekStr = timeDateStr.substr(secondNewLine + 1);
@@ -660,23 +600,20 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) 
         int startY = (windowHeight - totalHeight) / 2 - 20;
 
         RECT timeRect = clientRect;
-        timeRect.top = startY;
-        timeRect.bottom = startY + timeHeight;
+        timeRect.top = startY; timeRect.bottom = startY + timeHeight;
         HGDIOBJ hOldFont = SelectObject(memDC, hLargeFont);
         SetTextColor(memDC, RGB(220, 220, 255));
         SetBkMode(memDC, TRANSPARENT);
         DrawTextW(memDC, timeStr.c_str(), -1, &timeRect, DT_CENTER | DT_VCENTER | DT_NOPREFIX | DT_SINGLELINE);
 
         RECT dateRect = clientRect;
-        dateRect.top = startY + timeHeight + 10;
-        dateRect.bottom = dateRect.top + dateHeight;
+        dateRect.top = startY + timeHeight + 10; dateRect.bottom = dateRect.top + dateHeight;
         HGDIOBJ hOldDateFont = SelectObject(memDC, hDateFont);
         SetTextColor(memDC, RGB(200, 200, 240));
         DrawTextW(memDC, dateStr.c_str(), -1, &dateRect, DT_CENTER | DT_VCENTER | DT_NOPREFIX | DT_SINGLELINE);
 
         RECT weekRect = clientRect;
-        weekRect.top = dateRect.bottom + 10;
-        weekRect.bottom = weekRect.top + weekHeight;
+        weekRect.top = dateRect.bottom + 10; weekRect.bottom = weekRect.top + weekHeight;
         SetTextColor(memDC, RGB(180, 180, 220));
         DrawTextW(memDC, weekStr.c_str(), -1, &weekRect, DT_CENTER | DT_VCENTER | DT_NOPREFIX | DT_SINGLELINE);
 
@@ -697,14 +634,8 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) 
             std::wstring currentStr = GetTimeDateString();
             std::wstring currentSource = GetTimeSourceString();
             bool needRedraw = false;
-            if (currentStr != lastTimeStr) {
-                lastTimeStr = currentStr;
-                needRedraw = true;
-            }
-            if (currentSource != lastSourceStr) {
-                lastSourceStr = currentSource;
-                needRedraw = true;
-            }
+            if (currentStr != lastTimeStr) { lastTimeStr = currentStr; needRedraw = true; }
+            if (currentSource != lastSourceStr) { lastSourceStr = currentSource; needRedraw = true; }
             if (needRedraw) InvalidateRect(hWnd, NULL, FALSE);
         }
         else if (wParam == 2) {
@@ -721,8 +652,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) 
         WORD ctrlId = LOWORD(wParam);
         if (ctrlId == ID_FULLSCREEN_BTN) {
             ToggleFullscreen(hWnd);
-            if (hFullscreenBtn)
-                SetWindowTextW(hFullscreenBtn, IsFullscreen() ? L"窗口化 (F11)" : L"全屏 (F11)");
+            if (hFullscreenBtn) SetWindowTextW(hFullscreenBtn, IsFullscreen() ? L"窗口化 (F11)" : L"全屏 (F11)");
         }
         else if (ctrlId == ID_EXIT_BTN) {
             PostMessage(hWnd, WM_CLOSE, 0, 0);
@@ -730,7 +660,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) 
         else if (ctrlId == ID_SYNC_BTN) {
             StartSync(hWnd);
         }
-        else if (ctrlId == ID_TOPMOST_BTN) {   // 新增：置顶按钮
+        else if (ctrlId == ID_TOPMOST_BTN) {
             ToggleTopmost(hWnd);
         }
         break;
@@ -748,7 +678,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) 
             else if (wParam == VK_F5) {
                 StartSync(hWnd);
             }
-            else if (wParam == VK_F6) {        // 新增：F6 置顶切换
+            else if (wParam == VK_F6) {
                 ToggleTopmost(hWnd);
             }
         }
@@ -764,7 +694,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) 
 
     case WM_GETMINMAXINFO: {
         LPMINMAXINFO lpMMI = (LPMINMAXINFO)lParam;
-        RECT rc = { 0, 0, 550, 300 };
+        RECT rc = { 0, 0, MIN_WINDOW_WIDTH, MIN_WINDOW_HEIGHT };
         AdjustWindowRectEx(&rc, GetWindowLong(hWnd, GWL_STYLE), FALSE,
             GetWindowLong(hWnd, GWL_EXSTYLE));
         lpMMI->ptMinTrackSize.x = rc.right - rc.left;
@@ -783,15 +713,9 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) 
             ToggleFullscreen(hWnd);
             if (hFullscreenBtn) SetWindowTextW(hFullscreenBtn, IsFullscreen() ? L"窗口化 (F11)" : L"全屏 (F11)");
         }
-        else if (wParam == 2) {
-            PostMessage(hWnd, WM_CLOSE, 0, 0);
-        }
-        else if (wParam == 3) {
-            StartSync(hWnd);
-        }
-        else if (wParam == 4) {   // 新增：F6 全局热键
-            ToggleTopmost(hWnd);
-        }
+        else if (wParam == 2) PostMessage(hWnd, WM_CLOSE, 0, 0);
+        else if (wParam == 3) StartSync(hWnd);
+        else if (wParam == 4) ToggleTopmost(hWnd);
         return 0;
     }
 
@@ -825,7 +749,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) 
             UnregisterHotKey(hWnd, 1);
             UnregisterHotKey(hWnd, 2);
             UnregisterHotKey(hWnd, 3);
-            UnregisterHotKey(hWnd, 4);   // 新增注销F6
+            UnregisterHotKey(hWnd, 4);
         }
         PostQuitMessage(0);
         break;
