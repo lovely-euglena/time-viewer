@@ -302,7 +302,7 @@ FontSizes CalculateFontSizes(HWND hWnd) {
     sizes.date = max(15, min(sizes.date, (int)(windowHeight * 0.12)));
     sizes.week = (int)(sizes.time * 0.3);
     sizes.week = max(15, min(sizes.week, (int)(windowHeight * 0.1)));
-    sizes.button = 20;
+    sizes.button = max(15, min(25, windowHeight / 25));
 
     // 时间来源字体：主时间字体的 1/5，最小10px，最大18px
     sizes.source = max(10, min(18, (int)(sizes.time * 0.2)));
