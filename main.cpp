@@ -305,7 +305,7 @@ FontSizes CalculateFontSizes(HWND hWnd) {
     sizes.week = max(15, min(sizes.week, (int)(windowHeight * 0.1)));
     // 按钮字体不再基于窗口高度，将在 CreateDynamicFonts 中直接使用 g_buttonHeight
     sizes.button = 0;   // 未使用
-    sizes.source = max(10, min(8, (int)(sizes.time * 0.1)));
+    sizes.source = max(20, min(12, (int)(sizes.time * 0.25)));
     return sizes;
 }
 
