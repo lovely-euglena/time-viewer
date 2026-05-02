@@ -171,7 +171,7 @@ void CreateDynamicFonts(HWND hWnd) {
 
     // 按钮字体：基于 g_buttonHeight 计算，不受 sizes.button 影响
     if (hFullscreenBtn && hExitBtn && hSyncBtn && hTopmostBtn) {
-        int btnFontSize = max(12, (int)(g_buttonHeight * 0.5));  // 按钮高度的65%，最小12px
+        int btnFontSize = max(12, (int)(g_buttonHeight * 0.4));  // 按钮高度的40%，最小12px
         HFONT hBtnFont = CreateFontW(
             -btnFontSize, 0, 0, 0, FW_MEDIUM,
             FALSE, FALSE, FALSE, DEFAULT_CHARSET,
