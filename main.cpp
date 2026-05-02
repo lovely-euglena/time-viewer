@@ -30,8 +30,6 @@
 
 // 自动同步定时器ID
 #define TIMER_AUTO_SYNC     3
-// 注意：ntp_client.h 中已定义 AUTO_SYNC_INTERVAL 为 3600（秒），
-// 此处本宏用于毫秒，改名为 AUTO_SYNC_INTERVAL_MS 避免重定义警告
 #define AUTO_SYNC_INTERVAL_MS  3600000  // 1小时 = 3600000毫秒
 
 // 窗口过程函数声明
@@ -51,6 +49,11 @@ std::atomic<bool> g_syncing{ false };   // 同步进行中标志
 std::atomic<bool> g_exitFlag{ false };  // 程序退出标志
 std::thread g_syncThread;               // 同步线程对象
 
+// ===== 命令行参数标志 =====
+bool g_hideButtons = false;      // 是否隐藏按钮
+bool g_startFullscreen = false;  // 是否启动即全屏
+bool g_noHotKeys = false;        // 是否不注册热键
+
 // ===== 网络时间存储（永不过期，成功获取后一直使用）=====
 static SYSTEMTIME g_networkTime = { 0 };     // 最后一次成功同步的网络时间
 static bool g_hasNetworkTime = false;      // 是否已获取过有效的网络时间
@@ -61,7 +64,7 @@ struct FontSizes {
     int date;
     int week;
     int button;
-    int source;      // 新增：时间来源字体大小
+    int source;
 };
 
 // ==================== 函数声明 ====================
@@ -76,7 +79,7 @@ FontSizes CalculateFontSizes(HWND hWnd);
 // ===== 时间源管理函数 =====
 int GetDisplayTime(SYSTEMTIME& st);
 std::wstring GetTimeDateStringEx();
-std::wstring GetTimeSourceString();       // 新增：获取时间来源文字
+std::wstring GetTimeSourceString();       // 获取时间来源文字
 
 // ==================== 函数实现 ====================
 
@@ -188,6 +191,7 @@ void CreateDynamicFonts(HWND hWnd) {
         CLEARTYPE_QUALITY, DEFAULT_PITCH, L"Segoe UI"
     );
 
+    // 如果按钮存在，单独创建按钮字体并发送
     if (hFullscreenBtn && hExitBtn && hSyncBtn) {
         HFONT hBtnFont = CreateFontW(
             -sizes.button, 0, 0, 0, FW_MEDIUM,
@@ -203,15 +207,17 @@ void CreateDynamicFonts(HWND hWnd) {
     }
 }
 
-// 5. 创建控件（已移除 WS_TABSTOP，避免按钮抢键盘焦点）
+// 5. 创建控件（依据 g_hideButtons 决定是否创建）
 void CreateControls(HWND hWnd) {
+    if (g_hideButtons) return;   // 命令行要求不显示按钮
+
     RECT clientRect;
     GetClientRect(hWnd, &clientRect);
 
     UINT dpi = GetWindowDpi(hWnd);
     float scaleFactor = dpi / 96.0f;
 
-    int btnWidth = (int)(120 * scaleFactor);
+    int btnWidth = (int)(130 * scaleFactor);
     int btnHeight = (int)(40 * scaleFactor);
     int spacing = (int)(20 * scaleFactor);
     int btnY = clientRect.bottom - btnHeight - (int)(20 * scaleFactor);
@@ -235,7 +241,7 @@ void CreateControls(HWND hWnd) {
     );
 
     hSyncBtn = CreateWindowW(
-        L"BUTTON", L"同步时间",
+        L"BUTTON", L"同步时间 (F5)",
         WS_VISIBLE | WS_CHILD | BS_PUSHBUTTON | BS_FLAT,
         startX + (btnWidth + spacing) * 2, btnY, btnWidth, btnHeight,
         hWnd, (HMENU)ID_SYNC_BTN,
@@ -270,7 +276,8 @@ void HandleTouchInput(HWND hWnd, WPARAM wParam, LPARAM lParam) {
                         abs(currentPoint.x - lastTouchPoint.x) < 50 &&
                         abs(currentPoint.y - lastTouchPoint.y) < 50) {
                         ToggleFullscreen(hWnd);
-                        SetWindowTextW(hFullscreenBtn, IsFullscreen() ? L"窗口化 (F11)" : L"全屏 (F11)");
+                        if (hFullscreenBtn)
+                            SetWindowTextW(hFullscreenBtn, IsFullscreen() ? L"窗口化 (F11)" : L"全屏 (F11)");
                     }
                     lastTouchTime = currentTime;
                     lastTouchPoint = currentPoint;
@@ -286,7 +293,8 @@ void HandleTouchInput(HWND hWnd, WPARAM wParam, LPARAM lParam) {
 void StartSync(HWND hWnd) {
     if (g_syncing) return;
     g_syncing = true;
-    SetWindowTextW(hSyncBtn, L"同步中...");
+    if (hSyncBtn)
+        SetWindowTextW(hSyncBtn, L"同步中...");
     if (g_syncThread.joinable()) {
         g_syncThread.join();
     }
@@ -330,6 +338,24 @@ int WINAPI wWinMain(_In_ HINSTANCE hInstance,
     _In_opt_ HINSTANCE hPrevInstance,
     _In_ LPWSTR lpCmdLine,
     _In_ int nCmdShow) {
+
+    // ---- 命令行参数解析 ----
+    int argc;
+    LPWSTR* argv = CommandLineToArgvW(GetCommandLineW(), &argc);
+    if (argv) {
+        for (int i = 1; i < argc; ++i) {
+            if (wcscmp(argv[i], L"--no-button") == 0 || wcscmp(argv[i], L"-b") == 0) {
+                g_hideButtons = true;
+            }
+            else if (wcscmp(argv[i], L"--full-screen") == 0 || wcscmp(argv[i], L"-f") == 0) {
+                g_startFullscreen = true;
+            }
+            else if (wcscmp(argv[i], L"--nok-key") == 0 || wcscmp(argv[i], L"-k") == 0) {
+                g_noHotKeys = true;
+            }
+        }
+        LocalFree(argv);
+    }
 
     // 设置DPI感知
     HMODULE hUser32 = LoadLibraryW(L"user32.dll");
@@ -403,6 +429,13 @@ int WINAPI wWinMain(_In_ HINSTANCE hInstance,
     ShowWindow(hMainWindow, nCmdShow);
     UpdateWindow(hMainWindow);
 
+    // 如果命令行要求启动即全屏
+    if (g_startFullscreen) {
+        ToggleFullscreen(hMainWindow);
+        if (hFullscreenBtn)
+            SetWindowTextW(hFullscreenBtn, IsFullscreen() ? L"窗口化 (F11)" : L"全屏 (F11)");
+    }
+
     // 启动后立即手动同步一次（异步）
     StartSync(hMainWindow);
 
@@ -442,15 +475,17 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) 
         CreateControls(hWnd);
         SetWindowMinSize(hWnd, 550, 300);
 
-        // 注册全局热键（ESC 作为全局热键极易冲突，改为 Ctrl+Shift+Q 退出）
-        if (!RegisterHotKey(hWnd, 1, 0, VK_F11)) {
-            OutputDebugStringW(L"全局热键 F11 注册失败\n");
-        }
-        if (!RegisterHotKey(hWnd, 2, MOD_CONTROL | MOD_SHIFT, 'Q')) {
-            OutputDebugStringW(L"全局热键 Ctrl+Shift+Q 注册失败\n");
-        }
-        if (!RegisterHotKey(hWnd, 3, 0, VK_F5)) {
-            OutputDebugStringW(L"全局热键 F5 注册失败\n");
+        // 注册全局热键（除非被命令行禁用）
+        if (!g_noHotKeys) {
+            if (!RegisterHotKey(hWnd, 1, 0, VK_F11)) {
+                OutputDebugStringW(L"全局热键 F11 注册失败\n");
+            }
+            if (!RegisterHotKey(hWnd, 2, MOD_CONTROL | MOD_SHIFT, 'Q')) {
+                OutputDebugStringW(L"全局热键 Ctrl+Shift+Q 注册失败\n");
+            }
+            if (!RegisterHotKey(hWnd, 3, 0, VK_F5)) {
+                OutputDebugStringW(L"全局热键 F5 注册失败\n");
+            }
         }
         break;
     }
@@ -504,6 +539,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) 
         CreateDynamicFonts(hWnd);
         InvalidateRect(hWnd, NULL, FALSE);
 
+        // 如果按钮存在，重新布局
         if (hFullscreenBtn && hExitBtn && hSyncBtn) {
             RECT clientRect;
             GetClientRect(hWnd, &clientRect);
@@ -544,17 +580,17 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) 
         FillRect(memDC, &clientRect, hBrush);
         DeleteObject(hBrush);
 
-        // ===== 绘制时间来源指示器（左上角）=====
+        // 绘制时间来源指示器（左上角）
         std::wstring sourceText = GetTimeSourceString();
         if (!sourceText.empty()) {
             RECT sourceRect = clientRect;
-            sourceRect.left = 12;      // 左边距12px
-            sourceRect.top = 8;        // 上边距8px
+            sourceRect.left = 12;
+            sourceRect.top = 8;
             sourceRect.right = clientRect.right - 12;
             sourceRect.bottom = sourceRect.top + 30;
 
             HGDIOBJ hOldSourceFont = SelectObject(memDC, hSourceFont);
-            SetTextColor(memDC, RGB(140, 140, 160));  // 灰色，低调显示
+            SetTextColor(memDC, RGB(140, 140, 160));
             SetBkMode(memDC, TRANSPARENT);
             DrawTextW(memDC, sourceText.c_str(), -1, &sourceRect,
                 DT_LEFT | DT_TOP | DT_NOPREFIX | DT_SINGLELINE);
@@ -632,7 +668,8 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) 
         }
         else if (wParam == 2) {
             // 恢复按钮文字（3秒后）
-            SetWindowTextW(hSyncBtn, L"同步时间");
+            if (hSyncBtn)
+                SetWindowTextW(hSyncBtn, L"同步时间 (F5)");
             KillTimer(hWnd, 2);
         }
         else if (wParam == TIMER_AUTO_SYNC) {
@@ -648,7 +685,8 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) 
         WORD ctrlId = LOWORD(wParam);
         if (ctrlId == ID_FULLSCREEN_BTN) {
             ToggleFullscreen(hWnd);
-            SetWindowTextW(hFullscreenBtn, IsFullscreen() ? L"窗口化 (F11)" : L"全屏 (F11)");
+            if (hFullscreenBtn)
+                SetWindowTextW(hFullscreenBtn, IsFullscreen() ? L"窗口化 (F11)" : L"全屏 (F11)");
         }
         else if (ctrlId == ID_EXIT_BTN) {
             PostMessage(hWnd, WM_CLOSE, 0, 0);
@@ -659,24 +697,27 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) 
         break;
     }
 
-    // 窗口焦点时的键盘快捷键（保留）
     case WM_KEYDOWN: {
-        if (wParam == VK_F11) {
-            ToggleFullscreen(hWnd);
-            SetWindowTextW(hFullscreenBtn, IsFullscreen() ? L"窗口化 (F11)" : L"全屏 (F11)");
-        }
-        else if (wParam == VK_ESCAPE) {
-            PostMessage(hWnd, WM_CLOSE, 0, 0);
-        }
-        else if (wParam == VK_F5) {
-            StartSync(hWnd);
+        if (!g_noHotKeys) {
+            if (wParam == VK_F11) {
+                ToggleFullscreen(hWnd);
+                if (hFullscreenBtn)
+                    SetWindowTextW(hFullscreenBtn, IsFullscreen() ? L"窗口化 (F11)" : L"全屏 (F11)");
+            }
+            else if (wParam == VK_ESCAPE) {
+                PostMessage(hWnd, WM_CLOSE, 0, 0);
+            }
+            else if (wParam == VK_F5) {
+                StartSync(hWnd);
+            }
         }
         break;
     }
 
     case WM_NCLBUTTONDBLCLK: {
         if (HandleNcLButtonDblClk(hWnd, wParam)) {
-            SetWindowTextW(hFullscreenBtn, IsFullscreen() ? L"窗口化 (F11)" : L"全屏 (F11)");
+            if (hFullscreenBtn)
+                SetWindowTextW(hFullscreenBtn, IsFullscreen() ? L"窗口化 (F11)" : L"全屏 (F11)");
         }
         break;
     }
@@ -697,41 +738,41 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) 
         return 0;
     }
 
-                 // 全局热键处理
     case WM_HOTKEY: {
         if (wParam == 1) {
             ToggleFullscreen(hWnd);
-            SetWindowTextW(hFullscreenBtn, IsFullscreen() ? L"窗口化 (F11)" : L"全屏 (F11)");
+            if (hFullscreenBtn)
+                SetWindowTextW(hFullscreenBtn, IsFullscreen() ? L"窗口化 (F11)" : L"全屏 (F11)");
         }
         else if (wParam == 2) {
             PostMessage(hWnd, WM_CLOSE, 0, 0);
         }
-        else if (wParam == 3) {  // F5
+        else if (wParam == 3) {
             StartSync(hWnd);
         }
         return 0;
     }
 
     case WM_NTP_SYNC_FINISHED: {
-        // 同步完成（无论是手动还是自动触发）
         if (wParam == 1) {
             SYSTEMTIME ntpHour;
             if (GetLastNetworkTime(&ntpHour)) {
                 g_networkTime = ntpHour;
                 g_hasNetworkTime = true;
-                SetWindowTextW(hSyncBtn, L"同步成功");
-                // 立即刷新界面，显示网络时间和新的来源指示器
+                if (hSyncBtn)
+                    SetWindowTextW(hSyncBtn, L"同步成功");
                 InvalidateRect(hWnd, NULL, FALSE);
-                g_syncBaseTick = GetTickCount64();   // 记录同步时的本地时刻
+                g_syncBaseTick = GetTickCount64();
             }
             else {
-                SetWindowTextW(hSyncBtn, L"同步失败");
+                if (hSyncBtn)
+                    SetWindowTextW(hSyncBtn, L"同步失败");
             }
         }
         else {
-            SetWindowTextW(hSyncBtn, L"同步失败");
+            if (hSyncBtn || hSyncBtn == 0)  SetWindowTextW(hSyncBtn, L"同步失败");
         }
-        EnableWindow(hSyncBtn, TRUE);
+        if (hSyncBtn || hSyncBtn == 0)   EnableWindow(hSyncBtn, TRUE);
         g_syncing = false;
         SetTimer(hWnd, 2, 3000, NULL);
         break;
@@ -740,9 +781,11 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) 
     case WM_DESTROY: {
         KillTimer(hWnd, 1);
         KillTimer(hWnd, TIMER_AUTO_SYNC);
-        UnregisterHotKey(hWnd, 1);
-        UnregisterHotKey(hWnd, 2);
-        UnregisterHotKey(hWnd, 3);
+        if (!g_noHotKeys) {
+            UnregisterHotKey(hWnd, 1);
+            UnregisterHotKey(hWnd, 2);
+            UnregisterHotKey(hWnd, 3);
+        }
         PostQuitMessage(0);
         break;
     }
