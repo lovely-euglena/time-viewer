@@ -52,6 +52,7 @@ std::thread g_syncThread;               // 同步线程对象
 // ===== 网络时间存储（永不过期，成功获取后一直使用）=====
 static SYSTEMTIME g_networkTime = { 0 };     // 最后一次成功同步的网络时间
 static bool g_hasNetworkTime = false;      // 是否已获取过有效的网络时间
+static ULONGLONG g_syncBaseTick = 0;  // 同步时刻的本地 TickCount (毫秒)
 
 struct FontSizes {
     int time;
@@ -80,12 +81,24 @@ std::wstring GetTimeSourceString();       // 新增：获取时间来源文字
 // 1. 获取当前显示时间（网络时间优先，永不过期）
 int GetDisplayTime(SYSTEMTIME& st) {
     if (g_hasNetworkTime) {
-        st = g_networkTime;
-        return 1; // 网络时间
+        // 计算流逝的毫秒数
+        ULONGLONG elapsedMs = GetTickCount64() - g_syncBaseTick;
+        // 将网络时间转为 FILETIME（100纳秒单位）
+        FILETIME ft;
+        SystemTimeToFileTime(&g_networkTime, &ft);
+        ULARGE_INTEGER uli;
+        uli.LowPart = ft.dwLowDateTime;
+        uli.HighPart = ft.dwHighDateTime;
+        // 加上流逝的时间（毫秒 → 100纳秒）
+        uli.QuadPart += elapsedMs * 10000ULL;
+        // 转回 SYSTEMTIME
+        ft.dwLowDateTime = uli.LowPart;
+        ft.dwHighDateTime = uli.HighPart;
+        FileTimeToSystemTime(&ft, &st);
+        return 1;
     }
-    // 未获取过网络时间，使用本地系统时间
     GetLocalTime(&st);
-    return 0; // 本地时间
+    return 0;
 }
 
 // 2. 获取时间来源文字（用于左上角显示）
@@ -677,6 +690,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) 
                 SetWindowTextW(hSyncBtn, L"同步成功");
                 // 立即刷新界面，显示网络时间和新的来源指示器
                 InvalidateRect(hWnd, NULL, FALSE);
+                g_syncBaseTick = GetTickCount64();   // 记录同步时的本地时刻
             }
             else {
                 SetWindowTextW(hSyncBtn, L"同步失败");
