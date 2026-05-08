@@ -196,6 +196,8 @@ void CreateControls(HWND hWnd) {
     UINT dpi = GetWindowDpi(hWnd);
     float scaleFactor = dpi / 96.0f;
 
+    //记得修改为根据窗口高度计算
+
     int btnWidth = (int)(105 * scaleFactor);
     int btnHeight = (int)(40 * scaleFactor);   // 按钮高度
     g_buttonHeight = btnHeight;                // 保存实际高度
