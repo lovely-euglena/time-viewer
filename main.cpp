@@ -1,4 +1,5 @@
 ﻿// main.cpp
+// main.cpp
 // Windows 11风格时间显示主程序
 // 修改：基于 DPI 动态调整所有尺寸上限（按钮、字体、窗口最小尺寸）
 
@@ -15,6 +16,8 @@
 #include <string>
 #include <thread>
 #include <atomic>
+#include <cstdio>
+#include <cstdlib>
 #include "fullscreen.h"
 #include "ntp_client.h"
 
@@ -79,6 +82,7 @@ int  g_transparency = 255;
 bool g_startTopmost = false;
 bool g_topmost = false;
 bool g_givehelp = false;
+bool g_showVersion = false;    // 新增：显示版本信息
 
 // ===== 按钮动态尺寸相关全局变量 =====
 int g_buttonWidth = 0;          // 当前按钮宽度（像素）
@@ -112,7 +116,84 @@ int GetDisplayTime(SYSTEMTIME& st);
 std::wstring GetTimeDateStringEx();
 std::wstring GetTimeSourceString();
 
-// ==================== 函数实现 ====================
+// ==================== 新增：帮助系统函数 ====================
+
+// 将消息输出到控制台（支持分配/附加父控制台）
+static void PrintToConsole(const wchar_t* msg) {
+    HANDLE hCon = GetStdHandle(STD_OUTPUT_HANDLE);
+    if (hCon == INVALID_HANDLE_VALUE || hCon == nullptr) {
+        // 尝试附加父进程控制台或分配新控制台
+        if (!AttachConsole(ATTACH_PARENT_PROCESS)) {
+            AllocConsole();
+        }
+        hCon = GetStdHandle(STD_OUTPUT_HANDLE);
+    }
+    if (hCon && hCon != INVALID_HANDLE_VALUE) {
+        DWORD written = 0;
+        WriteConsoleW(hCon, msg, (DWORD)wcslen(msg), &written, nullptr);
+    }
+    else {
+        // 最后备选：使用 OutputDebugString
+        OutputDebugStringW(msg);
+    }
+}
+
+// 显示版本信息并退出
+static void ShowVersionAndExit() {
+    const wchar_t* versionMsg =
+        L"TimeDisplay 时间显示器 v2.0\n"
+        L"Windows 11 风格网络时间同步工具\n"
+        L"编译时间: " __DATE__ " " __TIME__ L"\n"
+        L"开源地址: https://gitee.com/ygwill/time-viewer\n";
+    PrintToConsole(versionMsg);
+    exit(0);
+}
+
+// 显示完整帮助信息并退出
+static void ShowHelpAndExit() {
+    const wchar_t* helpMsg =
+        L"TimeDisplay 时间显示器\n"
+        L"Windows 11 风格网络时间同步工具\n"
+        L"访问 https://gitee.com/ygwill/time-viwer/releases/ 获取更新\n"
+        L"\n使用方法:\n"
+        L"  TimeDisplay.exe [选项]\n"
+        L"\n【命令行选项】\n"
+        L"  -b, --no-button       隐藏所有按钮（全屏、退出、同步、置顶）\n"
+        L"  -f, --full-screen     启动时自动进入全屏模式\n"
+        L"  -k, --nok-key         禁用全局热键（F11, F5, F6, Ctrl+Shift+Q）\n"
+        L"  -p, --topmost         启动时自动置顶窗口\n"
+        L"  -t, --transparency    设置窗口透明度 (0-255, 0=完全透明, 255=不透明)\n"
+        L"  -h, --help            显示此帮助信息\n"
+        L"  -v, --version         显示版本信息\n"
+        L"\n【热键说明】（默认启用，可用 -k 禁用）\n"
+        L"  F11                   切换全屏/窗口模式\n"
+        L"  F5                    手动同步网络时间（NTP）\n"
+        L"  F6                    切换窗口置顶状态\n"
+        L"  Ctrl+Shift+Q          退出程序\n"
+        L"  双击标题栏（或触摸双击） 切换全屏模式\n"
+        L"\n【功能特性】\n"
+        L"  • NTP网络时间同步（自动/手动）\n"
+        L"  • 多显示器DPI自适应\n"
+        L"  • 窗口圆角效果（Windows 11风格）\n"
+        L"  • 透明度调节\n"
+        L"  • 触摸屏支持（双击切换全屏）\n"
+        L"  • 自动同步间隔：1小时\n"
+        L"  • 最小窗口尺寸：基于DPI动态调整（基准600×400）\n"
+        L"  • 长宽比限制：最小6:5\n"
+        L"\n【使用示例】\n"
+        L"  TimeDisplay.exe                          # 普通模式启动\n"
+        L"  TimeDisplay.exe -f -p                    # 全屏+置顶启动\n"
+        L"  TimeDisplay.exe --no-button --transparency 200  # 无按钮半透明\n"
+        L"  TimeDisplay.exe -k -b                    # 禁用热键并隐藏按钮\n"
+        L"\n【项目信息】\n"
+        L"  开源地址：https://gitee.com/ygwill/time-viewer\n"
+        L"  问题反馈：请在Gitee上提交Issue\n"
+        L"\n";
+    PrintToConsole(helpMsg);
+    exit(0);
+}
+
+// ==================== 原有函数实现 ====================
 
 int GetDisplayTime(SYSTEMTIME& st) {
     if (g_hasNetworkTime) {
@@ -363,93 +444,6 @@ void ToggleTopmost(HWND hWnd) {
     }
 }
 
-/*
-void help(int page = 0) {
-    using std::cout;
-    using std::string;
-    using std::endl;
-
-    const string help_header =
-        "╔══════════════════════════════════════════════════════════════════╗\n"
-        "║                    TimeViewer 时间显示器 v1.0                     ║\n"
-        "║               Windows 11 风格网络时间同步工具                      ║\n"
-        "╚══════════════════════════════════════════════════════════════════╝\n";
-
-    const string help_usage =
-        "\n使用方法:\n"
-        "  TimeViewer.exe [选项]\n";
-
-    const string help_options_page0 =
-        "\n【命令行选项】\n"
-        "  -b, --no-button       隐藏所有按钮（全屏、退出、同步、置顶）\n"
-        "  -f, --full-screen     启动时自动进入全屏模式\n"
-        "  -k, --nok-key         禁用全局热键（F11, F5, F6, Ctrl+Shift+Q）\n"
-        "  -p, --topmost         启动时自动置顶窗口\n"
-        "  -t, --transparency    设置窗口透明度 (0-255, 0=完全透明, 255=不透明)\n"
-        "  -h, --help            显示此帮助信息\n"
-        "  -v, --version         显示版本信息\n";
-
-    const string help_options_page1 =
-        "\n【热键说明】（默认启用，可用 -k 禁用）\n"
-        "  F11                   切换全屏/窗口模式\n"
-        "  F5                    手动同步网络时间（NTP）\n"
-        "  F6                    切换窗口置顶状态\n"
-        "  Ctrl+Shift+Q          退出程序\n"
-        "  双击标题栏（或触摸双击） 切换全屏模式\n";
-
-    const string help_options_page2 =
-        "\n【功能特性】\n"
-        "  • NTP网络时间同步（自动/手动）\n"
-        "  • 多显示器DPI自适应\n"
-        "  • 窗口圆角效果（Windows 11风格）\n"
-        "  • 透明度调节\n"
-        "  • 触摸屏支持（双击切换全屏）\n"
-        "  • 自动同步间隔：1小时\n"
-        "  • 最小窗口尺寸：基于DPI动态调整（基准600×400）\n"
-        "  • 长宽比限制：最小6:5\n";
-
-    const string help_tips =
-        "\n【使用示例】\n"
-        "  TimeViewer.exe                          # 普通模式启动\n"
-        "  TimeViewer.exe -f -p                    # 全屏+置顶启动\n"
-        "  TimeViewer.exe --no-button --transparency 200  # 无按钮半透明\n"
-        "  TimeViewer.exe -k -b                    # 禁用热键并隐藏按钮\n";
-
-    const string help_footer =
-        "\n【项目信息】\n"
-        "  开源地址：https://gitee.com/ygwill/time-viewer\n"
-        "  问题反馈：请在Gitee上提交Issue\n"
-        "\n";
-
-    switch (page) {
-    case 0:
-        cout << help_header << help_usage << help_options_page0;
-        break;
-    case 1:
-        cout << help_options_page1;
-        break;
-    case 2:
-        cout << help_options_page2;
-        break;
-    case 3:
-        cout << help_tips;
-        break;
-    case 4:
-        cout << help_footer;
-        break;
-    default:
-        cout << help_header << help_usage << help_options_page0
-            << help_options_page1 << help_options_page2
-            << help_tips << help_footer;
-        break;
-    }
-
-    if (page >= 0 && page <= 4 && page != -1) {
-        cout << "\n提示：使用 'TimeViewer.exe -h' 查看完整帮助信息\n";
-    }
-}
-*/
-
 int WINAPI wWinMain(_In_ HINSTANCE hInstance,
     _In_opt_ HINSTANCE hPrevInstance,
     _In_ LPWSTR lpCmdLine,
@@ -469,6 +463,8 @@ int WINAPI wWinMain(_In_ HINSTANCE hInstance,
                 g_startTopmost = true;
             else if (wcscmp(argv[i], L"--help") == 0 || wcscmp(argv[i], L"-h") == 0)
                 g_givehelp = true;
+            else if (wcscmp(argv[i], L"--version") == 0 || wcscmp(argv[i], L"-v") == 0)
+                g_showVersion = true;
             else if ((wcscmp(argv[i], L"--transparency") == 0 || wcscmp(argv[i], L"-t") == 0) && i + 1 < argc) {
                 int val = _wtoi(argv[++i]);
                 if (val >= 0 && val <= 255) g_transparency = val;
@@ -477,6 +473,15 @@ int WINAPI wWinMain(_In_ HINSTANCE hInstance,
         LocalFree(argv);
     }
 
+    // ===== 帮助或版本信息优先处理，不创建窗口 =====
+    if (g_showVersion) {
+        ShowVersionAndExit();
+    }
+    if (g_givehelp) {
+        ShowHelpAndExit();
+    }
+
+    // 高DPI设置
     HMODULE hUser32 = LoadLibraryW(L"user32.dll");
     if (hUser32) {
         auto pSetProcessDpiAwarenessContext = (BOOL(WINAPI*)(DPI_AWARENESS_CONTEXT))GetProcAddress(hUser32, "SetProcessDpiAwarenessContext");
@@ -519,7 +524,7 @@ int WINAPI wWinMain(_In_ HINSTANCE hInstance,
         return 1;
     }
 
-// 获取主显示器 DPI 用于初始化窗口大小
+    // 获取主显示器 DPI 用于初始化窗口大小
     UINT dpi = 96;
     HDC hdcScreen = GetDC(nullptr);
     if (hdcScreen) {
