@@ -334,8 +334,14 @@ FontSizes CalculateFontSizes(HWND hWnd) {
     int minWeekFont = ScaleByDpi(BASE_MIN_WEEK_FONT, hWnd);
     sizes.week = max(minWeekFont, min(sizes.week, (int)(windowHeight * 0.1)));
 
-    sizes.button = 0;
-    sizes.source = max(20, min(12, (int)(sizes.time * 0.25)));
+    // 来源字体：基准范围 10~26，随 DPI 缩放
+    int baseSourceMin = 10;
+    int baseSourceMax = 16;
+    int minSourceFont = ScaleByDpi(baseSourceMin, hWnd);
+    int maxSourceFont = ScaleByDpi(baseSourceMax, hWnd);
+    int rawSource = (int)(sizes.time * 0.25);
+    sizes.source = max(minSourceFont, min(maxSourceFont, rawSource));
+
     return sizes;
 }
 
@@ -680,11 +686,17 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) 
 
         std::wstring sourceText = GetTimeSourceString();
         if (!sourceText.empty()) {
-            RECT sourceRect = clientRect;
-            sourceRect.left = 12; sourceRect.top = 8;
-            sourceRect.right = clientRect.right - 12;
-            sourceRect.bottom = sourceRect.top + 30;
+            // 动态计算来源文字所需高度
             HGDIOBJ hOldSourceFont = SelectObject(memDC, hSourceFont);
+            TEXTMETRIC tm;
+            GetTextMetrics(memDC, &tm);
+            int sourceHeight = tm.tmHeight + 6; // 字体高度 + 少量边距
+            RECT sourceRect = clientRect;
+            sourceRect.left = 12;
+            sourceRect.top = 8;
+            sourceRect.right = clientRect.right - 12;
+            sourceRect.bottom = sourceRect.top + sourceHeight;
+
             SetTextColor(memDC, RGB(140, 140, 160));
             SetBkMode(memDC, TRANSPARENT);
             DrawTextW(memDC, sourceText.c_str(), -1, &sourceRect,
