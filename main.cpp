@@ -513,12 +513,26 @@ int WINAPI wWinMain(_In_ HINSTANCE hInstance,
         return 1;
     }
 
+// 获取主显示器 DPI 用于初始化窗口大小
+    UINT dpi = 96;
+    HDC hdcScreen = GetDC(nullptr);
+    if (hdcScreen) {
+        dpi = GetDeviceCaps(hdcScreen, LOGPIXELSX);
+        ReleaseDC(nullptr, hdcScreen);
+    }
+    // 基准初始大小 (96 DPI 下)
+    const int BASE_INIT_WIDTH = 800;
+    const int BASE_INIT_HEIGHT = 600;
+    int initWidth = (int)(BASE_INIT_WIDTH * dpi / 96.0f);
+    int initHeight = (int)(BASE_INIT_HEIGHT * dpi / 96.0f);
+
     hMainWindow = CreateWindowExW(
         WS_EX_APPWINDOW | (g_transparency < 255 ? WS_EX_LAYERED : 0),
         CLASS_NAME,
         L"时间显示器",
         WS_OVERLAPPEDWINDOW,
-        CW_USEDEFAULT, CW_USEDEFAULT, 800, 600,
+        CW_USEDEFAULT, CW_USEDEFAULT,
+        initWidth, initHeight,
         nullptr, nullptr, hInstance, nullptr);
 
     if (!hMainWindow) {
