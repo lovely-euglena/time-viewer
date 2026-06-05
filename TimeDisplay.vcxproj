@@ -217,12 +217,14 @@
     </PreBuildEvent>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClCompile Include="help.cpp" />
     <ClCompile Include="main.cpp" />
     <ClCompile Include="fullscreen.cpp" />
     <ClCompile Include="ntp_client.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="fullscreen.h" />
+    <ClInclude Include="help.h" />
     <ClInclude Include="ntp_client.h" />
     <ClInclude Include="resource.h" />
   </ItemGroup>
