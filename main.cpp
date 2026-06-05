@@ -178,8 +178,6 @@ static void ShowHelpAndExit() {
         L"  • 透明度调节\n"
         L"  • 触摸屏支持（双击切换全屏）\n"
         L"  • 自动同步间隔：1小时\n"
-        L"  • 最小窗口尺寸：基于DPI动态调整（基准600×400）\n"
-        L"  • 长宽比限制：最小6:5\n"
         L"\n【使用示例】\n"
         L"  TimeDisplay.exe                          # 普通模式启动\n"
         L"  TimeDisplay.exe -f -p                    # 全屏+置顶启动\n"
