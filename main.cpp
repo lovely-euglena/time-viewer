@@ -1,6 +1,6 @@
 ﻿// main.cpp
 // Windows 11风格时间显示主程序
-// 修改：按钮尺寸由窗口大小动态决定，不再使用固定逻辑尺寸
+// 修改：基于 DPI 动态调整所有尺寸上限（按钮、字体、窗口最小尺寸）
 
 // 必须最先包含 winsock2.h，避免与 windows.h 冲突
 #include <winsock2.h>
@@ -34,8 +34,27 @@
 #define TIMER_AUTO_SYNC     3
 #define AUTO_SYNC_INTERVAL_MS  3600000  // 1小时 = 3600000毫秒
 
+// 基准尺寸（96 DPI 下）
+#define BASE_MIN_WINDOW_WIDTH     600
+#define BASE_MIN_WINDOW_HEIGHT    400
+#define BASE_MIN_BTN_WIDTH        70
+#define BASE_MAX_BTN_WIDTH        150
+#define BASE_MIN_BTN_HEIGHT       30
+#define BASE_MAX_BTN_HEIGHT       60
+#define BASE_MIN_TIME_FONT        40
+#define BASE_MIN_DATE_FONT        15
+#define BASE_MIN_WEEK_FONT        15
+#define BASE_MIN_BTN_FONT         12
+
 // 窗口过程函数声明
 LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam);
+
+// 辅助函数：根据窗口 DPI 缩放基准值
+inline int ScaleByDpi(int baseValue, HWND hWnd) {
+    UINT dpi = GetWindowDpi(hWnd);
+    float scale = dpi / 96.0f;
+    return (int)(baseValue * scale);
+}
 
 // 全局变量
 HFONT hLargeFont = nullptr;
@@ -164,9 +183,8 @@ void CreateButtons(HWND hWnd) {
         0, 0, 0, 0, hWnd, (HMENU)ID_TOPMOST_BTN, hInst, NULL);
 }
 
-// 根据窗口大小动态计算按钮宽高、位置、间距，并刷新字体
+// 根据窗口大小动态计算按钮宽高、位置、间距，并刷新字体（基于 DPI 缩放上限）
 void UpdateButtonLayout(HWND hWnd) {
-    // 如果隐藏按钮或按钮未创建，则直接返回
     if (g_hideButtons) return;
     if (!hFullscreenBtn || !hExitBtn || !hSyncBtn || !hTopmostBtn) return;
 
@@ -176,32 +194,30 @@ void UpdateButtonLayout(HWND hWnd) {
     int clientHeight = clientRect.bottom - clientRect.top;
     if (clientWidth <= 0 || clientHeight <= 0) return;
 
-    // 动态决定按钮宽度和高度（基于窗口大小）
-    // 按钮宽度：窗口宽度的1/7 ~ 1/9，限制在 70~150 之间
-    int newBtnWidth = max(70, min(150, clientWidth / 7));
-    // 按钮高度：窗口高度的1/12 ~ 1/14，限制在 30~60 之间
-    int newBtnHeight = max(30, min(60, clientHeight / 12));
+    // 基于 DPI 动态计算最小/最大按钮尺寸
+    int minBtnWidth = ScaleByDpi(BASE_MIN_BTN_WIDTH, hWnd);
+    int maxBtnWidth = ScaleByDpi(BASE_MAX_BTN_WIDTH, hWnd);
+    int minBtnHeight = ScaleByDpi(BASE_MIN_BTN_HEIGHT, hWnd);
+    int maxBtnHeight = ScaleByDpi(BASE_MAX_BTN_HEIGHT, hWnd);
 
-    // 间距：按钮宽度的 0.2 倍，最少 8 像素
+    int newBtnWidth = max(minBtnWidth, min(maxBtnWidth, clientWidth / 7));
+    int newBtnHeight = max(minBtnHeight, min(maxBtnHeight, clientHeight / 12));
+
     int spacing = max(8, (int)(newBtnWidth * 0.2f));
-    // 底部边距：窗口高度的 3%，最少 15 像素
     int marginBottom = max(15, (int)(clientHeight * 0.03f));
 
     int totalWidth = newBtnWidth * 4 + spacing * 3;
     int startX = max(0, (clientWidth - totalWidth) / 2);
     int btnY = clientHeight - newBtnHeight - marginBottom;
 
-    // 更新全局尺寸
     g_buttonWidth = newBtnWidth;
     g_buttonHeight = newBtnHeight;
 
-    // 重新设置按钮位置和大小
     SetWindowPos(hFullscreenBtn, NULL, startX, btnY, newBtnWidth, newBtnHeight, SWP_NOZORDER);
     SetWindowPos(hExitBtn, NULL, startX + newBtnWidth + spacing, btnY, newBtnWidth, newBtnHeight, SWP_NOZORDER);
     SetWindowPos(hSyncBtn, NULL, startX + (newBtnWidth + spacing) * 2, btnY, newBtnWidth, newBtnHeight, SWP_NOZORDER);
     SetWindowPos(hTopmostBtn, NULL, startX + (newBtnWidth + spacing) * 3, btnY, newBtnWidth, newBtnHeight, SWP_NOZORDER);
 
-    // 根据新的按钮高度刷新按钮字体
     CreateDynamicFonts(hWnd);
 }
 
@@ -234,9 +250,9 @@ void CreateDynamicFonts(HWND hWnd) {
         CLEARTYPE_QUALITY, DEFAULT_PITCH, L"Segoe UI"
     );
 
-    // 按钮字体：基于当前 g_buttonHeight 动态创建（如果按钮已存在）
     if (hFullscreenBtn && hExitBtn && hSyncBtn && hTopmostBtn && g_buttonHeight > 0) {
-        int btnFontSize = max(12, (int)(g_buttonHeight * 0.4));  // 按钮高度的40%，最小12px
+        int minBtnFont = ScaleByDpi(BASE_MIN_BTN_FONT, hWnd);
+        int btnFontSize = max(minBtnFont, (int)(g_buttonHeight * 0.4));
         HFONT hBtnFont = CreateFontW(
             -btnFontSize, 0, 0, 0, FW_MEDIUM,
             FALSE, FALSE, FALSE, DEFAULT_CHARSET,
@@ -302,18 +318,22 @@ void SyncThreadProc(HWND hWnd) {
 FontSizes CalculateFontSizes(HWND hWnd) {
     RECT clientRect;
     GetClientRect(hWnd, &clientRect);
-    UINT dpi = GetWindowDpi(hWnd);
-    float scaleFactor = dpi / 96.0f;
     int windowHeight = clientRect.bottom - clientRect.top;
 
     FontSizes sizes;
     int targetTimeHeight = (int)(windowHeight * 0.35);
     sizes.time = (int)(targetTimeHeight * 0.75);
-    sizes.time = max(40, min(sizes.time, (int)(windowHeight * 0.45)));
+    int minTimeFont = ScaleByDpi(BASE_MIN_TIME_FONT, hWnd);
+    sizes.time = max(minTimeFont, min(sizes.time, (int)(windowHeight * 0.45)));
+
     sizes.date = (int)(sizes.time * 0.3);
-    sizes.date = max(15, min(sizes.date, (int)(windowHeight * 0.12)));
+    int minDateFont = ScaleByDpi(BASE_MIN_DATE_FONT, hWnd);
+    sizes.date = max(minDateFont, min(sizes.date, (int)(windowHeight * 0.12)));
+
     sizes.week = (int)(sizes.time * 0.3);
-    sizes.week = max(15, min(sizes.week, (int)(windowHeight * 0.1)));
+    int minWeekFont = ScaleByDpi(BASE_MIN_WEEK_FONT, hWnd);
+    sizes.week = max(minWeekFont, min(sizes.week, (int)(windowHeight * 0.1)));
+
     sizes.button = 0;
     sizes.source = max(20, min(12, (int)(sizes.time * 0.25)));
     return sizes;
@@ -379,7 +399,7 @@ void help(int page = 0) {
         "  • 透明度调节\n"
         "  • 触摸屏支持（双击切换全屏）\n"
         "  • 自动同步间隔：1小时\n"
-        "  • 最小窗口尺寸：600×400像素\n"
+        "  • 最小窗口尺寸：基于DPI动态调整（基准600×400）\n"
         "  • 长宽比限制：最小6:5\n";
 
     const string help_tips =
@@ -423,10 +443,6 @@ void help(int page = 0) {
     }
 }
 */
-
-// 窗口最小尺寸常数（长宽）
-const int MIN_WINDOW_WIDTH = 600;
-const int MIN_WINDOW_HEIGHT = 400;
 
 int WINAPI wWinMain(_In_ HINSTANCE hInstance,
     _In_opt_ HINSTANCE hPrevInstance,
@@ -568,10 +584,9 @@ int WINAPI wWinMain(_In_ HINSTANCE hInstance,
 LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) {
     switch (message) {
     case WM_CREATE: {
-        CreateButtons(hWnd);               // 创建按钮（不设大小）
-        UpdateButtonLayout(hWnd);          // 动态计算并设置按钮大小、位置、字体
-        SetWindowMinSize(hWnd, MIN_WINDOW_WIDTH, MIN_WINDOW_HEIGHT);
-
+        CreateButtons(hWnd);
+        UpdateButtonLayout(hWnd);
+        // 窗口最小尺寸在 WM_GETMINMAXINFO 中动态处理，不需要调用 SetWindowMinSize
         if (!g_noHotKeys) {
             RegisterHotKey(hWnd, 1, 0, VK_F11);
             RegisterHotKey(hWnd, 2, MOD_CONTROL | MOD_SHIFT, 'Q');
@@ -589,27 +604,28 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) 
             newRect->right - newRect->left,
             newRect->bottom - newRect->top,
             SWP_NOZORDER | SWP_NOACTIVATE);
-        // DPI 改变后，窗口客户区大小已变化，重新布局按钮
         UpdateButtonLayout(hWnd);
         return 0;
     }
 
     case WM_SIZING: {
         RECT* pRect = (RECT*)lParam;
+        int minWidth = ScaleByDpi(BASE_MIN_WINDOW_WIDTH, hWnd);
+        int minHeight = ScaleByDpi(BASE_MIN_WINDOW_HEIGHT, hWnd);
         int newWidth = pRect->right - pRect->left;
         int newHeight = pRect->bottom - pRect->top;
 
-        if (newWidth < MIN_WINDOW_WIDTH) {
+        if (newWidth < minWidth) {
             if (wParam == WMSZ_LEFT || wParam == WMSZ_BOTTOMLEFT || wParam == WMSZ_TOPLEFT)
-                pRect->left = pRect->right - MIN_WINDOW_WIDTH;
+                pRect->left = pRect->right - minWidth;
             else
-                pRect->right = pRect->left + MIN_WINDOW_WIDTH;
+                pRect->right = pRect->left + minWidth;
         }
-        if (newHeight < MIN_WINDOW_HEIGHT) {
+        if (newHeight < minHeight) {
             if (wParam == WMSZ_TOP || wParam == WMSZ_TOPLEFT || wParam == WMSZ_TOPRIGHT)
-                pRect->top = pRect->bottom - MIN_WINDOW_HEIGHT;
+                pRect->top = pRect->bottom - minHeight;
             else
-                pRect->bottom = pRect->top + MIN_WINDOW_HEIGHT;
+                pRect->bottom = pRect->top + minHeight;
         }
 
         float minRatio = 6.0f / 5.0f;
@@ -625,7 +641,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) 
     }
 
     case WM_SIZE: {
-        UpdateButtonLayout(hWnd);   // 窗口大小改变时重新布局按钮
+        UpdateButtonLayout(hWnd);
         InvalidateRect(hWnd, NULL, FALSE);
         break;
     }
@@ -771,7 +787,9 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) 
 
     case WM_GETMINMAXINFO: {
         LPMINMAXINFO lpMMI = (LPMINMAXINFO)lParam;
-        RECT rc = { 0, 0, MIN_WINDOW_WIDTH, MIN_WINDOW_HEIGHT };
+        int minWidth = ScaleByDpi(BASE_MIN_WINDOW_WIDTH, hWnd);
+        int minHeight = ScaleByDpi(BASE_MIN_WINDOW_HEIGHT, hWnd);
+        RECT rc = { 0, 0, minWidth, minHeight };
         AdjustWindowRectEx(&rc, GetWindowLong(hWnd, GWL_STYLE), FALSE,
             GetWindowLong(hWnd, GWL_EXSTYLE));
         lpMMI->ptMinTrackSize.x = rc.right - rc.left;
