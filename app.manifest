@@ -7,11 +7,10 @@
   />
   <application xmlns="urn:schemas-microsoft-com:asm.v3">
     <windowsSettings>
-      <!-- 启用Per-Monitor V2 DPI感知 -->
-      <dpiAware xmlns="http://schemas.microsoft.com/SMI/2005/WindowsSettings">true/pm</dpiAware>
-      <dpiAwareness xmlns="http://schemas.microsoft.com/SMI/2016/WindowsSettings">PerMonitorV2</dpiAwareness>
-      <!-- 启用GDI缩放，让GDI绘制也支持DPI -->
-      <dpiAwareness xmlns="http://schemas.microsoft.com/SMI/2016/WindowsSettings">PerMonitorV2, GdiDpiScaling</dpiAwareness>
+      <!-- Win7+: 系统DPI感知（兼容回退） -->
+      <dpiAware xmlns="http://schemas.microsoft.com/SMI/2005/WindowsSettings">true</dpiAware>
+      <!-- Win10 1703+: Per-Monitor V2 DPI感知 -->
+      <dpiAwareness xmlns="http://schemas.microsoft.com/SMI/2016/WindowsSettings">PerMonitorV2, PerMonitor, system</dpiAwareness>
     </windowsSettings>
   </application>
 </assembly>

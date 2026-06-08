@@ -21,6 +21,39 @@
 #include "fullscreen.h"
 #include "ntp_client.h"
 
+// ===== Windows 7 兼容：手动定义 Windows 10/11 新增的类型和常量 =====
+// 当 _WIN32_WINNT=0x0601 (Win7) 时，SDK 头文件不会导出这些类型/常量
+// 我们通过 GetProcAddress 动态调用这些 API，只需编译期类型定义即可
+#ifndef DPI_AWARENESS_CONTEXT
+DECLARE_HANDLE(DPI_AWARENESS_CONTEXT);
+#endif
+
+#ifndef DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2
+#define DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2  ((DPI_AWARENESS_CONTEXT)-4)
+#endif
+
+#ifndef DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE
+#define DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE  ((DPI_AWARENESS_CONTEXT)-2)
+#endif
+
+// DWM 圆角常量 (Windows 11 build 22000+)
+#ifndef DWMWA_WINDOW_CORNER_PREFERENCE
+#define DWMWA_WINDOW_CORNER_PREFERENCE 33
+#endif
+
+#ifndef DWMWCP_ROUND
+#define DWMWCP_ROUND 2
+#endif
+
+#ifndef DWM_WINDOW_CORNER_PREFERENCE
+typedef enum _DWM_WINDOW_CORNER_PREFERENCE {
+    DWMWCP_DEFAULT = 0,
+    DWMWCP_DONOTROUND = 1,
+    DWMWCP_ROUND = 2,
+    DWMWCP_ROUNDSMALL = 3
+} DWM_WINDOW_CORNER_PREFERENCE;
+#endif
+
 #pragma comment(lib, "dwmapi.lib")
 #pragma comment(lib, "comctl32.lib")
 
@@ -560,11 +593,18 @@ int WINAPI wWinMain(_In_ HINSTANCE hInstance,
         SetLayeredWindowAttributes(hMainWindow, 0, (BYTE)g_transparency, LWA_ALPHA);
     }
 
+    // Windows 11 圆角效果（仅在 Windows 11+ 上生效，Win7/10 静默忽略）
     DWM_WINDOW_CORNER_PREFERENCE cornerPreference = DWMWCP_ROUND;
-    DwmSetWindowAttribute(hMainWindow, DWMWA_WINDOW_CORNER_PREFERENCE,
+    HRESULT hr = DwmSetWindowAttribute(hMainWindow, DWMWA_WINDOW_CORNER_PREFERENCE,
         &cornerPreference, sizeof(cornerPreference));
+    if (FAILED(hr)) {
+        // Windows 7 / 10 不支持此属性，忽略
+    }
 
-    RegisterTouchWindow(hMainWindow, TWF_FINETOUCH);
+    // 注册触摸窗口（Win7+ 支持），失败不阻塞启动
+    if (!RegisterTouchWindow(hMainWindow, TWF_FINETOUCH)) {
+        OutputDebugStringW(L"触摸注册失败（当前系统不支持触摸）\n");
+    }
 
     if (!InitializeNTPClient()) {
         OutputDebugStringW(L"NTP客户端初始化失败\n");
