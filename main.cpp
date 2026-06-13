@@ -174,7 +174,6 @@ static void PrintToConsole(const wchar_t* msg) {
 // 显示版本信息并退出
 static void ShowVersionAndExit() {
     const wchar_t* versionMsg =
-        L"TimeDisplay 时间显示器 v2.0\n"
         L"Windows 11 风格网络时间同步工具\n"
         L"编译时间: " __DATE__ " " __TIME__ L"\n"
         L"开源地址: https://gitee.com/ygwill/time-viewer\n";
