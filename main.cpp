@@ -22,11 +22,17 @@
 #include "ntp_client.h"
 
 // ===== Windows 7 兼容：手动定义 Windows 10/11 新增的类型和常量 =====
-// 当 _WIN32_WINNT=0x0601 (Win7) 时，SDK 头文件不会导出这些类型/常量
+// 当 _WIN32_WINNT=0x0601 (Win7) 时，旧版 SDK 头文件不会导出这些类型/常量
 // 我们通过 GetProcAddress 动态调用这些 API，只需编译期类型定义即可
-#ifndef DPI_AWARENESS_CONTEXT
-DECLARE_HANDLE(DPI_AWARENESS_CONTEXT);
-#endif
+// 注意：#ifndef 对 typedef/struct 名无效，只能检测宏定义
+// Windows 11 SDK (10.0.22621+) 已自带这些定义，需避免重复
+
+// --- DPI_AWARENESS_CONTEXT (Windows 8.1+) ---
+// 不使用 DECLARE_HANDLE（它会定义 struct body + typedef），
+// 改用 forward declaration + typedef，因为 C++17 允许重复的同名 typedef，
+// 无论 SDK 是否已定义此类型都能编译通过。
+struct DPI_AWARENESS_CONTEXT__;
+typedef struct DPI_AWARENESS_CONTEXT__ *DPI_AWARENESS_CONTEXT;
 
 #ifndef DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2
 #define DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2  ((DPI_AWARENESS_CONTEXT)-4)
@@ -36,22 +42,12 @@ DECLARE_HANDLE(DPI_AWARENESS_CONTEXT);
 #define DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE  ((DPI_AWARENESS_CONTEXT)-2)
 #endif
 
-// DWM 圆角常量 (Windows 11 build 22000+)
+// --- DWM 圆角常量 (Windows 11 build 22000+) ---
+// 在 VS2022+ 的新版 SDK 中，DWMWA_WINDOW_CORNER_PREFERENCE 是
+// DWMWINDOWATTRIBUTE 枚举常量而不是 #define 宏，DWM_WINDOW_CORNER_PREFERENCE
+// 枚举也已在 dwmapi.h 中提供。此处只需确保 DWMWA_* 宏定义存在即可。
 #ifndef DWMWA_WINDOW_CORNER_PREFERENCE
 #define DWMWA_WINDOW_CORNER_PREFERENCE 33
-#endif
-
-#ifndef DWMWCP_ROUND
-#define DWMWCP_ROUND 2
-#endif
-
-#ifndef DWM_WINDOW_CORNER_PREFERENCE
-typedef enum _DWM_WINDOW_CORNER_PREFERENCE {
-    DWMWCP_DEFAULT = 0,
-    DWMWCP_DONOTROUND = 1,
-    DWMWCP_ROUND = 2,
-    DWMWCP_ROUNDSMALL = 3
-} DWM_WINDOW_CORNER_PREFERENCE;
 #endif
 
 #pragma comment(lib, "dwmapi.lib")

@@ -31,7 +31,7 @@ void ShowVersionAndExit() {
         L"编译时间: " __DATE__ " " __TIME__ L"\n"
         L"开源地址: https://gitee.com/ygwill/time-viewer\n";
     PrintToConsole(versionMsg);
-    exit(0);
+    return;
 }
 
 void ShowHelpAndExit() {
@@ -79,5 +79,5 @@ void ShowHelpAndExit() {
         L"===========================================================\n"
         L"\n\n\n";
     PrintToConsole(helpMsg);
-    exit(0);
+    return;
 }
