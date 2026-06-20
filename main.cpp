@@ -20,6 +20,7 @@
 #include <cstdlib>
 #include "fullscreen.h"
 #include "ntp_client.h"
+#include "resource.h"
 
 // ===== Windows 7 兼容：手动定义 Windows 10/11 新增的类型和常量 =====
 // 当 _WIN32_WINNT=0x0601 (Win7) 时，旧版 SDK 头文件不会导出这些类型/常量
@@ -98,6 +99,12 @@ HWND hFullscreenBtn = nullptr;
 HWND hExitBtn = nullptr;
 HWND hSyncBtn = nullptr;
 HWND hTopmostBtn = nullptr;
+
+// 嵌入字体相关
+static HANDLE g_hEmbeddedFont = nullptr;
+static bool g_useEmbeddedFont = false;
+static const wchar_t* FONT_FAMILY_EMBEDDED = L"Source Han Sans Regular";
+static const wchar_t* FONT_FAMILY_FALLBACK = g_useEmbeddedFont ? FONT_FAMILY_EMBEDDED : FONT_FAMILY_FALLBACK;
 
 std::atomic<bool> g_syncing{ false };
 std::atomic<bool> g_exitFlag{ false };
@@ -347,21 +354,21 @@ void CreateDynamicFonts(HWND hWnd) {
         -sizes.time, 0, 0, 0, FW_BOLD,
         FALSE, FALSE, FALSE, DEFAULT_CHARSET,
         OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
-        CLEARTYPE_QUALITY, DEFAULT_PITCH, L"Segoe UI"
+        CLEARTYPE_QUALITY, DEFAULT_PITCH, g_useEmbeddedFont ? FONT_FAMILY_EMBEDDED : FONT_FAMILY_FALLBACK
     );
 
     hDateFont = CreateFontW(
         -sizes.date, 0, 0, 0, FW_SEMIBOLD,
         FALSE, FALSE, FALSE, DEFAULT_CHARSET,
         OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
-        CLEARTYPE_QUALITY, DEFAULT_PITCH, L"Segoe UI"
+        CLEARTYPE_QUALITY, DEFAULT_PITCH, g_useEmbeddedFont ? FONT_FAMILY_EMBEDDED : FONT_FAMILY_FALLBACK
     );
 
     hSourceFont = CreateFontW(
         -sizes.source, 0, 0, 0, FW_NORMAL,
         FALSE, FALSE, FALSE, DEFAULT_CHARSET,
         OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
-        CLEARTYPE_QUALITY, DEFAULT_PITCH, L"Segoe UI"
+        CLEARTYPE_QUALITY, DEFAULT_PITCH, g_useEmbeddedFont ? FONT_FAMILY_EMBEDDED : FONT_FAMILY_FALLBACK
     );
 
     if (hFullscreenBtn && hExitBtn && hSyncBtn && hTopmostBtn && g_buttonHeight > 0) {
@@ -371,7 +378,7 @@ void CreateDynamicFonts(HWND hWnd) {
             -btnFontSize, 0, 0, 0, FW_MEDIUM,
             FALSE, FALSE, FALSE, DEFAULT_CHARSET,
             OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
-            CLEARTYPE_QUALITY, DEFAULT_PITCH, L"Segoe UI"
+            CLEARTYPE_QUALITY, DEFAULT_PITCH, g_useEmbeddedFont ? FONT_FAMILY_EMBEDDED : FONT_FAMILY_FALLBACK
         );
         SendMessageW(hFullscreenBtn, WM_SETFONT, (WPARAM)hBtnFont, TRUE);
         SendMessageW(hExitBtn, WM_SETFONT, (WPARAM)hBtnFont, TRUE);
@@ -459,6 +466,19 @@ FontSizes CalculateFontSizes(HWND hWnd) {
     return sizes;
 }
 
+// 检查字符串是否为纯数字（允许可选的负号开头）
+static bool IsNumericString(const wchar_t* str) {
+    if (!str || *str == L'\0') return false;
+    const wchar_t* p = str;
+    if (*p == L'-') ++p; // 允许负号开头，用于检测负数
+    if (*p == L'\0') return false; // 只有负号不算有效数字
+    while (*p) {
+        if (*p < L'0' || *p > L'9') return false;
+        ++p;
+    }
+    return true;
+}
+
 void ToggleTopmost(HWND hWnd) {
     g_topmost = !g_topmost;
     LONG exStyle = GetWindowLong(hWnd, GWL_EXSTYLE);
@@ -477,6 +497,26 @@ void ToggleTopmost(HWND hWnd) {
     }
 }
 
+// ===== 嵌入字体加载 =====
+
+static bool LoadEmbeddedFont() {
+    HRSRC hRes = FindResourceW(GetModuleHandleW(nullptr), MAKEINTRESOURCEW(IDF_SOURCEHANS), RT_RCDATA);
+    if (!hRes) return false;
+
+    HGLOBAL hData = LoadResource(GetModuleHandleW(nullptr), hRes);
+    if (!hData) return false;
+
+    void* pFontData = LockResource(hData);
+    DWORD dwSize = SizeofResource(GetModuleHandleW(nullptr), hRes);
+    if (!pFontData || dwSize == 0) return false;
+
+    DWORD cFonts = 0;
+    g_hEmbeddedFont = AddFontMemResourceEx(pFontData, dwSize, 0, &cFonts);
+    if (!g_hEmbeddedFont || cFonts == 0) return false;
+
+    return true;
+}
+
 int WINAPI wWinMain(_In_ HINSTANCE hInstance,
     _In_opt_ HINSTANCE hPrevInstance,
     _In_ LPWSTR lpCmdLine,
@@ -486,21 +526,62 @@ int WINAPI wWinMain(_In_ HINSTANCE hInstance,
     LPWSTR* argv = CommandLineToArgvW(GetCommandLineW(), &argc);
     if (argv) {
         for (int i = 1; i < argc; ++i) {
-            if (wcscmp(argv[i], L"--no-button") == 0 || wcscmp(argv[i], L"-b") == 0)
+            if (wcscmp(argv[i], L"--no-button") == 0 || wcscmp(argv[i], L"-b") == 0) {
                 g_hideButtons = true;
-            else if (wcscmp(argv[i], L"--full-screen") == 0 || wcscmp(argv[i], L"-f") == 0)
+            }
+            else if (wcscmp(argv[i], L"--full-screen") == 0 || wcscmp(argv[i], L"-f") == 0) {
                 g_startFullscreen = true;
-            else if (wcscmp(argv[i], L"--nok-key") == 0 || wcscmp(argv[i], L"-k") == 0)
+            }
+            else if (wcscmp(argv[i], L"--nok-key") == 0 || wcscmp(argv[i], L"-k") == 0) {
                 g_noHotKeys = true;
-            else if (wcscmp(argv[i], L"--topmost") == 0 || wcscmp(argv[i], L"-p") == 0)
+            }
+            else if (wcscmp(argv[i], L"--topmost") == 0 || wcscmp(argv[i], L"-p") == 0) {
                 g_startTopmost = true;
-            else if (wcscmp(argv[i], L"--help") == 0 || wcscmp(argv[i], L"-h") == 0)
+            }
+            else if (wcscmp(argv[i], L"--help") == 0 || wcscmp(argv[i], L"-h") == 0) {
                 g_givehelp = true;
-            else if (wcscmp(argv[i], L"--version") == 0 || wcscmp(argv[i], L"-v") == 0)
+            }
+            else if (wcscmp(argv[i], L"--version") == 0 || wcscmp(argv[i], L"-v") == 0) {
                 g_showVersion = true;
-            else if ((wcscmp(argv[i], L"--transparency") == 0 || wcscmp(argv[i], L"-t") == 0) && i + 1 < argc) {
-                int val = _wtoi(argv[++i]);
-                if (val >= 0 && val <= 255) g_transparency = val;
+            }
+            else if (wcscmp(argv[i], L"--transparency") == 0 || wcscmp(argv[i], L"-t") == 0) {
+                // --transparency/-t 需要后面跟数值参数
+                if (i + 1 >= argc) {
+                    PrintToConsole(L"错误: 选项 --transparency/-t 需要一个数值参数 (0-255)\n");
+                    PrintToConsole(L"用法示例: TimeDisplay.exe --transparency 200\n");
+                    LocalFree(argv);
+                    return 1;
+                }
+                const wchar_t* valStr = argv[++i];
+                if (!IsNumericString(valStr)) {
+                    wchar_t errMsg[256];
+                    wsprintfW(errMsg, L"错误: --transparency/-t 的参数 '%s' 不是有效的数字\n", valStr);
+                    PrintToConsole(errMsg);
+                    LocalFree(argv);
+                    return 1;
+                }
+                int val = _wtoi(valStr);
+                if (val < 0 || val > 255) {
+                    wchar_t errMsg[256];
+                    wsprintfW(errMsg, L"错误: 透明度值 %d 超出有效范围，允许值为 0-255\n", val);
+                    PrintToConsole(errMsg);
+                    LocalFree(argv);
+                    return 1;
+                }
+                if (val == 0) {
+                    PrintToConsole(L"警告: 透明度设置为 0，窗口将完全不可见。\n");
+                    PrintToConsole(L"提示: 若确实需要此设置，请确认这是您的预期行为。\n");
+                }
+                g_transparency = val;
+            }
+            else {
+                // 无法识别的参数 → 报错并退出
+                wchar_t errMsg[256];
+                wsprintfW(errMsg, L"错误: 无法识别的选项 '%s'\n", argv[i]);
+                PrintToConsole(errMsg);
+                PrintToConsole(L"使用 --help/-h 查看所有可用选项\n");
+                LocalFree(argv);
+                return 1;
             }
         }
         LocalFree(argv);
@@ -605,6 +686,14 @@ int WINAPI wWinMain(_In_ HINSTANCE hInstance,
         OutputDebugStringW(L"NTP客户端初始化失败\n");
     }
 
+    // 加载嵌入字体（失败则回退到 Segoe UI）
+    g_useEmbeddedFont = LoadEmbeddedFont();
+    if (g_useEmbeddedFont) {
+        OutputDebugStringW(L"嵌入字体加载成功: Source Han Sans Regular\n");
+    } else {
+        OutputDebugStringW(L"嵌入字体加载失败，将使用 Segoe UI 回退\n");
+    }
+
     CreateDynamicFonts(hMainWindow);
     InitializeFullscreenModule(hMainWindow);
 
@@ -636,6 +725,7 @@ int WINAPI wWinMain(_In_ HINSTANCE hInstance,
     if (hDateFont) DeleteObject(hDateFont);
     if (hNormalFont) DeleteObject(hNormalFont);
     if (hSourceFont) DeleteObject(hSourceFont);
+    if (g_hEmbeddedFont) RemoveFontMemResourceEx(g_hEmbeddedFont);
 
     g_exitFlag = true;
     if (g_syncThread.joinable()) g_syncThread.join();

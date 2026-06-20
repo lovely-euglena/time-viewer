@@ -239,6 +239,10 @@
   <ItemGroup>
     <Image Include="resource\ico\favicon.ico" />
   </ItemGroup>
+  <ItemGroup>
+    <None Include="Font\SourceHanSans-Regular-Subset.otf" />
+    <None Include="Font\OFL.txt" />
+  </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
   </ImportGroup>
