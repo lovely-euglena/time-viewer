@@ -104,7 +104,7 @@ HWND hTopmostBtn = nullptr;
 static HANDLE g_hEmbeddedFont = nullptr;
 static bool g_useEmbeddedFont = false;
 static const wchar_t* FONT_FAMILY_EMBEDDED = L"Source Han Sans Regular";
-static const wchar_t* FONT_FAMILY_FALLBACK = g_useEmbeddedFont ? FONT_FAMILY_EMBEDDED : FONT_FAMILY_FALLBACK;
+static const wchar_t* FONT_FAMILY_FALLBACK = L"Segoe UI";
 
 std::atomic<bool> g_syncing{ false };
 std::atomic<bool> g_exitFlag{ false };
@@ -119,6 +119,12 @@ bool g_startTopmost = false;
 bool g_topmost = false;
 bool g_givehelp = false;
 bool g_showVersion = false;    // 新增：显示版本信息
+
+// ===== 命令行字体参数 =====
+std::wstring g_cmdFontName;           // --font-name 参数指定的字体族名称
+std::wstring g_cmdFontPath;           // --font-path 参数指定的字体文件路径
+std::wstring g_fontFamilyToUse;       // 最终解析后实际使用的字体族名称
+bool g_fontLoadedFromPath = false;    // 是否通过 --font-path 从外部文件加载了字体
 
 // ===== 按钮动态尺寸相关全局变量 =====
 int g_buttonWidth = 0;          // 当前按钮宽度（像素）
@@ -202,6 +208,11 @@ static void ShowHelpAndExit() {
         L"  -t, --transparency    设置窗口透明度 (0-255, 0=完全透明, 255=不透明)\n"
         L"  -h, --help            显示此帮助信息\n"
         L"  -v, --version         显示版本信息\n"
+        L"  --font-name <名称>    指定显示字体（系统中已安装的字体族名称）\n"
+        L"                        示例: --font-name \"Microsoft YaHei\"\n"
+        L"  --font-path <路径>    从外部字体文件加载字体（支持 .ttf/.otf）\n"
+        L"                        示例: --font-path \"C:\\Fonts\\CustomFont.ttf\"\n"
+        L"                        可与 --font-name 组合使用以指定字体族名称\n"
         L"===========================================================\n"
         L"\n【热键说明】（默认启用，可用 -k 禁用）\n"
         L"  F11                   切换全屏/窗口模式\n"
@@ -223,6 +234,8 @@ static void ShowHelpAndExit() {
         L"  TimeDisplay.exe -f -p                    # 全屏+置顶启动\n"
         L"  TimeDisplay.exe --no-button --transparency 200  # 无按钮半透明\n"
         L"  TimeDisplay.exe -k -b                    # 禁用热键并隐藏按钮\n"
+        L"  TimeDisplay.exe --font-name \"Microsoft YaHei\"  # 使用微软雅黑字体\n"
+        L"  TimeDisplay.exe --font-path \"myfont.ttf\" --font-name \"MyFont\"  # 加载外部字体\n"
         L"===========================================================\n"
         L"\n【项目信息】\n"
         L"  开源地址：https://gitee.com/ygwill/time-viewer\n"
@@ -350,25 +363,32 @@ void CreateDynamicFonts(HWND hWnd) {
     if (hNormalFont) { DeleteObject(hNormalFont); hNormalFont = nullptr; }
     if (hSourceFont) { DeleteObject(hSourceFont); hSourceFont = nullptr; }
 
+    // 确定最终使用的字体族名称：
+    //   1. 命令行指定字体（--font-name / --font-path）
+    //   2. 嵌入字体（Source Han Sans Regular）
+    //   3. 回退字体（Segoe UI）
+    const wchar_t* fontFamily = !g_fontFamilyToUse.empty() ? g_fontFamilyToUse.c_str() :
+        (g_useEmbeddedFont ? FONT_FAMILY_EMBEDDED : FONT_FAMILY_FALLBACK);
+
     hLargeFont = CreateFontW(
         -sizes.time, 0, 0, 0, FW_BOLD,
         FALSE, FALSE, FALSE, DEFAULT_CHARSET,
         OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
-        CLEARTYPE_QUALITY, DEFAULT_PITCH, g_useEmbeddedFont ? FONT_FAMILY_EMBEDDED : FONT_FAMILY_FALLBACK
+        CLEARTYPE_QUALITY, DEFAULT_PITCH, fontFamily
     );
 
     hDateFont = CreateFontW(
         -sizes.date, 0, 0, 0, FW_SEMIBOLD,
         FALSE, FALSE, FALSE, DEFAULT_CHARSET,
         OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
-        CLEARTYPE_QUALITY, DEFAULT_PITCH, g_useEmbeddedFont ? FONT_FAMILY_EMBEDDED : FONT_FAMILY_FALLBACK
+        CLEARTYPE_QUALITY, DEFAULT_PITCH, fontFamily
     );
 
     hSourceFont = CreateFontW(
         -sizes.source, 0, 0, 0, FW_NORMAL,
         FALSE, FALSE, FALSE, DEFAULT_CHARSET,
         OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
-        CLEARTYPE_QUALITY, DEFAULT_PITCH, g_useEmbeddedFont ? FONT_FAMILY_EMBEDDED : FONT_FAMILY_FALLBACK
+        CLEARTYPE_QUALITY, DEFAULT_PITCH, fontFamily
     );
 
     if (hFullscreenBtn && hExitBtn && hSyncBtn && hTopmostBtn && g_buttonHeight > 0) {
@@ -378,7 +398,7 @@ void CreateDynamicFonts(HWND hWnd) {
             -btnFontSize, 0, 0, 0, FW_MEDIUM,
             FALSE, FALSE, FALSE, DEFAULT_CHARSET,
             OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
-            CLEARTYPE_QUALITY, DEFAULT_PITCH, g_useEmbeddedFont ? FONT_FAMILY_EMBEDDED : FONT_FAMILY_FALLBACK
+            CLEARTYPE_QUALITY, DEFAULT_PITCH, fontFamily
         );
         SendMessageW(hFullscreenBtn, WM_SETFONT, (WPARAM)hBtnFont, TRUE);
         SendMessageW(hExitBtn, WM_SETFONT, (WPARAM)hBtnFont, TRUE);
@@ -499,6 +519,72 @@ void ToggleTopmost(HWND hWnd) {
 
 // ===== 嵌入字体加载 =====
 
+// 字体枚举回调数据结构（用于 IsFontNameValid）
+struct FontCheckData {
+    const wchar_t* targetName;
+    bool found;
+};
+
+// 字体枚举回调函数
+static int CALLBACK EnumFontCheckProc(const LOGFONTW* lpelfe, const TEXTMETRICW* lpntme, DWORD FontType, LPARAM lParam) {
+    auto* data = reinterpret_cast<FontCheckData*>(lParam);
+    if (data->targetName && data->targetName[0] &&
+        _wcsicmp(lpelfe->lfFaceName, data->targetName) == 0) {
+        data->found = true;
+        return 0; // 找到目标字体，停止枚举
+    }
+    return 1; // 继续枚举
+}
+
+// 验证字体名称是否有效（系统中是否存在该字体族）
+static bool IsFontNameValid(const wchar_t* fontName) {
+    if (!fontName || fontName[0] == L'\0') return false;
+
+    HDC hdc = GetDC(nullptr);
+    if (!hdc) return false;
+
+    LOGFONTW lf = { 0 };
+    lf.lfCharSet = DEFAULT_CHARSET;
+
+    FontCheckData data = { fontName, false };
+    EnumFontFamiliesExW(hdc, &lf, EnumFontCheckProc, (LPARAM)&data, 0);
+
+    ReleaseDC(nullptr, hdc);
+    return data.found;
+}
+
+// 验证字体文件路径是否存在且可读
+static bool IsFontFileReadable(const wchar_t* fontPath) {
+    if (!fontPath || fontPath[0] == L'\0') return false;
+
+    DWORD attrs = GetFileAttributesW(fontPath);
+    if (attrs == INVALID_FILE_ATTRIBUTES) return false;
+    if (attrs & FILE_ATTRIBUTE_DIRECTORY) return false;
+
+    return true;
+}
+
+// 从字体文件路径中提取文件名（不含扩展名）作为字体族名称的猜测值
+static std::wstring GuessFontNameFromPath(const std::wstring& fontPath) {
+    size_t sep = fontPath.find_last_of(L"\\/");
+    std::wstring fname = (sep != std::wstring::npos) ? fontPath.substr(sep + 1) : fontPath;
+    size_t dot = fname.find_last_of(L".");
+    return (dot != std::wstring::npos) ? fname.substr(0, dot) : fname;
+}
+
+// 从文件路径加载字体（私有方式，仅当前进程可见）
+static bool LoadFontFromPath(const std::wstring& fontPath) {
+    int added = AddFontResourceExW(fontPath.c_str(), FR_PRIVATE, 0);
+    if (added == 0) {
+        wchar_t errMsg[512];
+        wsprintfW(errMsg, L"错误: 无法加载字体文件 '%s'，文件可能不是有效的字体格式或已被损坏\n", fontPath.c_str());
+        PrintToConsole(errMsg);
+        return false;
+    }
+    g_fontLoadedFromPath = true;
+    return true;
+}
+
 static bool LoadEmbeddedFont() {
     HRSRC hRes = FindResourceW(GetModuleHandleW(nullptr), MAKEINTRESOURCEW(IDF_SOURCEHANS), RT_RCDATA);
     if (!hRes) return false;
@@ -574,6 +660,36 @@ int WINAPI wWinMain(_In_ HINSTANCE hInstance,
                 }
                 g_transparency = val;
             }
+            else if (wcscmp(argv[i], L"--font-name") == 0) {
+                // --font-name 需要后面跟字体名称参数
+                if (i + 1 >= argc) {
+                    PrintToConsole(L"错误: 选项 --font-name 需要一个字体族名称参数\n");
+                    PrintToConsole(L"用法示例: TimeDisplay.exe --font-name \"Arial\"\n");
+                    LocalFree(argv);
+                    return 1;
+                }
+                g_cmdFontName = argv[++i];
+                if (g_cmdFontName.empty()) {
+                    PrintToConsole(L"错误: --font-name 的字体名称不能为空\n");
+                    LocalFree(argv);
+                    return 1;
+                }
+            }
+            else if (wcscmp(argv[i], L"--font-path") == 0) {
+                // --font-path 需要后面跟字体文件路径参数
+                if (i + 1 >= argc) {
+                    PrintToConsole(L"错误: 选项 --font-path 需要一个字体文件路径参数\n");
+                    PrintToConsole(L"用法示例: TimeDisplay.exe --font-path \"C:\\Windows\\Fonts\\myfont.ttf\"\n");
+                    LocalFree(argv);
+                    return 1;
+                }
+                g_cmdFontPath = argv[++i];
+                if (g_cmdFontPath.empty()) {
+                    PrintToConsole(L"错误: --font-path 的字体路径不能为空\n");
+                    LocalFree(argv);
+                    return 1;
+                }
+            }
             else {
                 // 无法识别的参数 → 报错并退出
                 wchar_t errMsg[256];
@@ -595,7 +711,47 @@ int WINAPI wWinMain(_In_ HINSTANCE hInstance,
         ShowHelpAndExit();
     }
 
-    // 高DPI设置
+    // ===== 字体参数验证 =====
+    // 验证 --font-name（未同时提供 --font-path 时）：检查系统中是否存在该字体
+    if (!g_cmdFontName.empty() && g_cmdFontPath.empty()) {
+        if (!IsFontNameValid(g_cmdFontName.c_str())) {
+            std::wstring errMsg = L"错误: 系统中未找到字体 '" + g_cmdFontName + L"'，请检查字体名称是否正确\n";
+            PrintToConsole(errMsg.c_str());
+            PrintToConsole(L"提示: 使用 --font-path 可以指定外部字体文件路径\n");
+            return 1;
+        }
+    }
+
+    // 验证 --font-path：检查文件是否存在且可读
+    if (!g_cmdFontPath.empty()) {
+        if (!IsFontFileReadable(g_cmdFontPath.c_str())) {
+            std::wstring errMsg = L"错误: 字体文件不存在或无法访问 '" + g_cmdFontPath + L"'\n";
+            PrintToConsole(errMsg.c_str());
+            return 1;
+        }
+    }
+
+    // ===== 字体解析：确定最终使用的字体 =====
+    if (!g_cmdFontPath.empty()) {
+        // 从文件加载字体
+        if (!LoadFontFromPath(g_cmdFontPath)) {
+            return 1; // LoadFontFromPath 内部已输出错误信息
+        }
+        // 如果用户未指定 --font-name，从文件名猜测字体族名称
+        if (g_cmdFontName.empty()) {
+            g_fontFamilyToUse = GuessFontNameFromPath(g_cmdFontPath);
+            wchar_t logMsg[512];
+            wsprintfW(logMsg, L"从文件名推断字体族名称: %s\n", g_fontFamilyToUse.c_str());
+            PrintToConsole(logMsg);
+        } else {
+            g_fontFamilyToUse = g_cmdFontName;
+        }
+    } else if (!g_cmdFontName.empty()) {
+        // 仅使用 --font-name，指定系统字体
+        g_fontFamilyToUse = g_cmdFontName;
+    }
+
+    // ===== 高DPI设置 =====
     HMODULE hUser32 = LoadLibraryW(L"user32.dll");
     if (hUser32) {
         auto pSetProcessDpiAwarenessContext = (BOOL(WINAPI*)(DPI_AWARENESS_CONTEXT))GetProcAddress(hUser32, "SetProcessDpiAwarenessContext");
@@ -686,12 +842,18 @@ int WINAPI wWinMain(_In_ HINSTANCE hInstance,
         OutputDebugStringW(L"NTP客户端初始化失败\n");
     }
 
-    // 加载嵌入字体（失败则回退到 Segoe UI）
-    g_useEmbeddedFont = LoadEmbeddedFont();
-    if (g_useEmbeddedFont) {
-        OutputDebugStringW(L"嵌入字体加载成功: Source Han Sans Regular\n");
+    // 加载嵌入字体（当未通过命令行指定字体时）
+    if (g_fontFamilyToUse.empty()) {
+        g_useEmbeddedFont = LoadEmbeddedFont();
+        if (g_useEmbeddedFont) {
+            OutputDebugStringW(L"嵌入字体加载成功: Source Han Sans Regular\n");
+        } else {
+            OutputDebugStringW(L"嵌入字体加载失败，将使用 Segoe UI 回退\n");
+        }
     } else {
-        OutputDebugStringW(L"嵌入字体加载失败，将使用 Segoe UI 回退\n");
+        wchar_t logMsg[256];
+        wsprintfW(logMsg, L"使用命令行指定字体: %s\n", g_fontFamilyToUse.c_str());
+        OutputDebugStringW(logMsg);
     }
 
     CreateDynamicFonts(hMainWindow);
@@ -726,6 +888,9 @@ int WINAPI wWinMain(_In_ HINSTANCE hInstance,
     if (hNormalFont) DeleteObject(hNormalFont);
     if (hSourceFont) DeleteObject(hSourceFont);
     if (g_hEmbeddedFont) RemoveFontMemResourceEx(g_hEmbeddedFont);
+    if (g_fontLoadedFromPath && !g_cmdFontPath.empty()) {
+        RemoveFontResourceExW(g_cmdFontPath.c_str(), FR_PRIVATE, 0);
+    }
 
     g_exitFlag = true;
     if (g_syncThread.joinable()) g_syncThread.join();
