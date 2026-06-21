@@ -108,3 +108,7 @@ TimeDisplay.exe --font-path "myfont.ttf" --font-name "MyFont"  # 加载外部字
 本项目基于 MIT License 开源。
 
 字体文件 `Font/SourceHanSans-Regular-Subset.otf` 基于思源黑体（Source Han Sans）裁剪生成，遵循 SIL Open Font License v1.1。
+
+
+
+> 此文部分内容可能由AI生成
