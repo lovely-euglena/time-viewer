@@ -347,16 +347,56 @@ void UpdateButtonLayout(HWND hWnd) {
     g_buttonWidth = newBtnWidth;
     g_buttonHeight = newBtnHeight;
 
-    SetWindowPos(hFullscreenBtn, NULL, startX, btnY, newBtnWidth, newBtnHeight, SWP_NOZORDER);
-    SetWindowPos(hExitBtn, NULL, startX + newBtnWidth + spacing, btnY, newBtnWidth, newBtnHeight, SWP_NOZORDER);
-    SetWindowPos(hSyncBtn, NULL, startX + (newBtnWidth + spacing) * 2, btnY, newBtnWidth, newBtnHeight, SWP_NOZORDER);
-    SetWindowPos(hTopmostBtn, NULL, startX + (newBtnWidth + spacing) * 3, btnY, newBtnWidth, newBtnHeight, SWP_NOZORDER);
+    // 使用 BeginDeferWindowPos / EndDeferWindowPos 原子批量更新按钮位置，
+    // 四个按钮在单次窗口呈现中同时移动到位，消除逐个 SetWindowPos 的中间态闪烁。
+    // 配合 WS_EX_COMPOSITED（非透明度模式）由 DWM 离屏缓冲一次性合成；
+    // 透明度模式下虽无 DWM 缓冲，但 DeferWindowPos 本身也减少了刷新次数。
+    HDWP hdwp = BeginDeferWindowPos(4);
+    if (hdwp) {
+        DeferWindowPos(hdwp, hFullscreenBtn, NULL,
+            startX, btnY, newBtnWidth, newBtnHeight,
+            SWP_NOZORDER | SWP_NOACTIVATE);
+        DeferWindowPos(hdwp, hExitBtn, NULL,
+            startX + newBtnWidth + spacing, btnY, newBtnWidth, newBtnHeight,
+            SWP_NOZORDER | SWP_NOACTIVATE);
+        DeferWindowPos(hdwp, hSyncBtn, NULL,
+            startX + (newBtnWidth + spacing) * 2, btnY, newBtnWidth, newBtnHeight,
+            SWP_NOZORDER | SWP_NOACTIVATE);
+        DeferWindowPos(hdwp, hTopmostBtn, NULL,
+            startX + (newBtnWidth + spacing) * 3, btnY, newBtnWidth, newBtnHeight,
+            SWP_NOZORDER | SWP_NOACTIVATE);
+        EndDeferWindowPos(hdwp);
+    }
 
+    // 统一刷新按钮
+    InvalidateRect(hFullscreenBtn, NULL, TRUE);
+    InvalidateRect(hExitBtn,       NULL, TRUE);
+    InvalidateRect(hSyncBtn,       NULL, TRUE);
+    InvalidateRect(hTopmostBtn,    NULL, TRUE);
+
+    // 实时更新字体大小：CreateDynamicFonts 内部拥有字体尺寸缓存，
+    // 尺寸未变时直接返回，不产生实际开销。
+    // 配合 WS_EX_COMPOSITED 离屏缓冲，频繁重建字体也不会有闪烁。
     CreateDynamicFonts(hWnd);
 }
 
 void CreateDynamicFonts(HWND hWnd) {
     FontSizes sizes = CalculateFontSizes(hWnd);
+
+    // 提前计算按钮字体尺寸，用于缓存判断
+    int minBtnFont = ScaleByDpi(BASE_MIN_BTN_FONT, hWnd);
+    int btnFontSize = max(minBtnFont, (int)(g_buttonHeight * 0.4));
+
+    // === 字体尺寸缓存：仅当尺寸真正变化时才重建字体，避免无用 DeleteObject/CreateFont ===
+    static FontSizes lastSizes = { 0 };
+    static int lastBtnFontSize = 0;
+    if (lastSizes.time == sizes.time && lastSizes.date == sizes.date &&
+        lastSizes.week == sizes.week && lastSizes.source == sizes.source &&
+        lastBtnFontSize == btnFontSize) {
+        return; // 所有字体尺寸均未变化，跳过重建
+    }
+    lastSizes = sizes;
+    lastBtnFontSize = btnFontSize;
 
     if (hLargeFont) { DeleteObject(hLargeFont); hLargeFont = nullptr; }
     if (hDateFont) { DeleteObject(hDateFont); hDateFont = nullptr; }
@@ -392,18 +432,18 @@ void CreateDynamicFonts(HWND hWnd) {
     );
 
     if (hFullscreenBtn && hExitBtn && hSyncBtn && hTopmostBtn && g_buttonHeight > 0) {
-        int minBtnFont = ScaleByDpi(BASE_MIN_BTN_FONT, hWnd);
-        int btnFontSize = max(minBtnFont, (int)(g_buttonHeight * 0.4));
         HFONT hBtnFont = CreateFontW(
             -btnFontSize, 0, 0, 0, FW_MEDIUM,
             FALSE, FALSE, FALSE, DEFAULT_CHARSET,
             OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
             CLEARTYPE_QUALITY, DEFAULT_PITCH, fontFamily
         );
-        SendMessageW(hFullscreenBtn, WM_SETFONT, (WPARAM)hBtnFont, TRUE);
-        SendMessageW(hExitBtn, WM_SETFONT, (WPARAM)hBtnFont, TRUE);
-        SendMessageW(hSyncBtn, WM_SETFONT, (WPARAM)hBtnFont, TRUE);
-        SendMessageW(hTopmostBtn, WM_SETFONT, (WPARAM)hBtnFont, TRUE);
+        // WM_SETFONT 最后一个参数用 FALSE：不立即强制重绘
+        // 按钮刷新由 UpdateButtonLayout 中的 InvalidateRect 统一管理
+        SendMessageW(hFullscreenBtn, WM_SETFONT, (WPARAM)hBtnFont, FALSE);
+        SendMessageW(hExitBtn,       WM_SETFONT, (WPARAM)hBtnFont, FALSE);
+        SendMessageW(hSyncBtn,       WM_SETFONT, (WPARAM)hBtnFont, FALSE);
+        SendMessageW(hTopmostBtn,    WM_SETFONT, (WPARAM)hBtnFont, FALSE);
         hNormalFont = hBtnFont;
     }
 }
@@ -777,11 +817,11 @@ int WINAPI wWinMain(_In_ HINSTANCE hInstance,
 
     WNDCLASSEXW wcex = { 0 };
     wcex.cbSize = sizeof(wcex);
-    wcex.style = CS_HREDRAW | CS_VREDRAW;
+    wcex.style = 0;
     wcex.lpfnWndProc = WndProc;
     wcex.hInstance = hInstance;
     wcex.hCursor = LoadCursor(nullptr, IDC_ARROW);
-    wcex.hbrBackground = CreateSolidBrush(RGB(10, 10, 20));
+    wcex.hbrBackground = nullptr;  // 不需要系统擦除背景，全部在 WM_PAINT 中绘制
     wcex.lpszClassName = CLASS_NAME;
     wcex.hIcon = LoadIconW(hInstance, MAKEINTRESOURCE(101));
     wcex.hIconSm = LoadIconW(hInstance, MAKEINTRESOURCE(101));
@@ -807,8 +847,17 @@ int WINAPI wWinMain(_In_ HINSTANCE hInstance,
     int initWidth = (int)(BASE_INIT_WIDTH * dpi / 96.0f);
     int initHeight = (int)(BASE_INIT_HEIGHT * dpi / 96.0f);
 
+    // WS_EX_COMPOSITED：DWM 离屏缓冲，父窗口与子窗口在单次呈现中一次性合成，
+    // 避免拖拽时背景擦除与子窗口交替绘制导致的闪烁。
+    // 注意：WS_EX_COMPOSITED 与 WS_EX_LAYERED 不兼容，透明度模式降级为常规方式。
+    DWORD exStyle = WS_EX_APPWINDOW;
+    if (g_transparency < 255) {
+        exStyle |= WS_EX_LAYERED;
+    } else {
+        exStyle |= WS_EX_COMPOSITED;
+    }
     hMainWindow = CreateWindowExW(
-        WS_EX_APPWINDOW | (g_transparency < 255 ? WS_EX_LAYERED : 0),
+        exStyle,
         CLASS_NAME,
         L"时间显示器",
         WS_OVERLAPPEDWINDOW,
@@ -915,6 +964,16 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) 
         }
         break;
     }
+
+    case WM_ERASEBKGND: {
+        // 所有绘制都在 WM_PAINT 双缓冲中完成，系统无需擦除背景。
+        // 配合 WS_EX_COMPOSITED 和 nullptr 背景画刷，彻底消除背景闪烁。
+        return TRUE;
+    }
+
+    // WM_ENTERSIZEMOVE / WM_EXITSIZEMOVE 已移除：
+    // 字体更新在 WM_SIZE → UpdateButtonLayout → CreateDynamicFonts 中实时完成，
+    // 无需在拖拽结束时单独触发。
 
     case WM_DPICHANGED: {
         UINT newDpi = LOWORD(wParam);
