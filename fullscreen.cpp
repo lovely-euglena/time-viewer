@@ -5,6 +5,9 @@
 #include "fullscreen.h"
 #include <windows.h>
 #include <winuser.h>
+#include <algorithm>
+
+using std::max;
 
 // 静态变量用于保存全屏状态和窗口原始信息
 static bool g_bFullscreen = false;                    // 全屏状态标志

@@ -13,9 +13,45 @@
 #include <thread>
 #include <mutex>
 #include <chrono>
-#include <random>
 #include <algorithm>
 #include <atomic>
+
+// ===== 简单自包含 RNG，替代已损坏的 MinGW-POSIX <random> 头 =====
+// 使用 xorshift64*，比 mt19937 更快，种子空间足够大
+class SimpleRng {
+public:
+    using result_type = uint64_t;
+    SimpleRng() : m_state(static_cast<uint64_t>(GetTickCount64() ^ reinterpret_cast<uintptr_t>(this))) {
+        // 混入更多熵
+        m_state ^= (m_state << 13);
+        m_state ^= (m_state >> 7);
+    }
+    result_type operator()() {
+        uint64_t x = m_state;
+        x ^= x >> 12;
+        x ^= x << 25;
+        x ^= x >> 27;
+        m_state = x;
+        return x * 0x2545F4914F6CDD1DULL;
+    }
+    static constexpr result_type min_val() { return 0; }
+    static constexpr result_type max_val() { return ~0ULL; }
+private:
+    uint64_t m_state;
+};
+
+template<typename IntType = int>
+class SimpleUniformInt {
+public:
+    SimpleUniformInt(IntType a, IntType b) : m_a(a), m_range(b - a + 1) {}
+    template<typename Rng>
+    IntType operator()(Rng& rng) const {
+        return static_cast<IntType>(m_a + static_cast<IntType>(rng() % static_cast<typename Rng::result_type>(m_range)));
+    }
+private:
+    IntType m_a;
+    typename std::make_unsigned<IntType>::type m_range;
+};
 
 #pragma comment(lib, "ws2_32.lib")
 
@@ -33,7 +69,7 @@ private:
     HANDLE timer_handle;
     std::atomic<bool> is_auto_syncing{ false };
     std::atomic<bool> is_initialized{ false };
-    std::mt19937 rng;
+    SimpleRng rng;
 
     // ===== 新增：网络时间存储 =====
     SYSTEMTIME m_lastNetworkTime;
@@ -228,7 +264,7 @@ private:
     void ApplyBackoffDelay(int retry_count) {
         int base_delay = 1000;
         int delay = base_delay * (1 << retry_count);
-        std::uniform_int_distribution<int> dist(-delay / 2, delay / 2);
+        SimpleUniformInt<int> dist(-delay / 2, delay / 2);
         int jitter = dist(rng);
         int total_delay = delay + jitter;
         if (total_delay > 0) {
@@ -244,7 +280,7 @@ private:
     }
 
 public:
-    NTPClient() : sock(INVALID_SOCKET), timer_handle(NULL), rng(std::random_device{}()),
+    NTPClient() : sock(INVALID_SOCKET), timer_handle(NULL), rng(),
         m_hasNetworkTime(false) {
         InitializeCriticalSection(&m_timeLock);
         ZeroMemory(&m_lastNetworkTime, sizeof(m_lastNetworkTime));

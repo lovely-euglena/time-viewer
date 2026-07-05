@@ -21,6 +21,11 @@
 #include "fullscreen.h"
 #include "ntp_client.h"
 #include "resource.h"
+#include "gpu_renderer.h"
+
+// 使 std::min / std::max 在全局作用域可用（避免宏冲突）
+using std::min;
+using std::max;
 
 // ===== Windows 7 兼容：手动定义 Windows 10/11 新增的类型和常量 =====
 // 当 _WIN32_WINNT=0x0601 (Win7) 时，旧版 SDK 头文件不会导出这些类型/常量
@@ -120,6 +125,11 @@ bool g_topmost = false;
 bool g_givehelp = false;
 bool g_showVersion = false;    // 新增：显示版本信息
 
+// ===== GPU 加速标志 =====
+bool g_disableGpu = false;         // --disable-gpu 强制使用 GDI 渲染
+bool g_useGpu = false;             // 运行时决定：GPU 渲染器是否就绪
+GpuRenderer g_gpuRenderer;         // GPU 渲染器实例
+
 // ===== 命令行字体参数 =====
 std::wstring g_cmdFontName;           // --font-name 参数指定的字体族名称
 std::wstring g_cmdFontPath;           // --font-path 参数指定的字体文件路径
@@ -158,7 +168,11 @@ int GetDisplayTime(SYSTEMTIME& st);
 std::wstring GetTimeDateStringEx();
 std::wstring GetTimeSourceString();
 
-// ==================== 新增：帮助系统函数 ====================
+// ===== 渲染辅助函数 =====
+static void PaintWithGDI(HWND hWnd, HDC hdc, const RECT& clientRect);
+static bool PaintWithGPU(HWND hWnd, const RECT& clientRect);
+
+// ===================== 新增：帮助系统函数 =====================
 
 // 将消息输出到控制台（支持分配/附加父控制台）
 static void PrintToConsole(const wchar_t* msg) {
@@ -213,6 +227,7 @@ static void ShowHelpAndExit() {
         L"  --font-path <路径>    从外部字体文件加载字体（支持 .ttf/.otf）\n"
         L"                        示例: --font-path \"C:\\Fonts\\CustomFont.ttf\"\n"
         L"                        可与 --font-name 组合使用以指定字体族名称\n"
+        L"  --disable-gpu         禁用 GPU 硬件加速，回退到 GDI 软件渲染\n"
         L"===========================================================\n"
         L"\n【热键说明】（默认启用，可用 -k 禁用）\n"
         L"  F11                   切换全屏/窗口模式\n"
@@ -227,6 +242,7 @@ static void ShowHelpAndExit() {
         L"  • 窗口圆角效果（Windows 11风格）\n"
         L"  • 透明度调节\n"
         L"  • 触摸屏支持（双击切换全屏）\n"
+        L"  • GPU 加速渲染（Direct2D + DirectWrite，更流畅的文字渲染）\n"
         L"  • 自动同步间隔：1小时\n"
         L"===========================================================\n"
         L"\n【使用示例】\n"
@@ -235,6 +251,7 @@ static void ShowHelpAndExit() {
         L"  TimeDisplay.exe --no-button --transparency 200  # 无按钮半透明\n"
         L"  TimeDisplay.exe -k -b                    # 禁用热键并隐藏按钮\n"
         L"  TimeDisplay.exe --font-name \"Microsoft YaHei\"  # 使用微软雅黑字体\n"
+        L"  TimeDisplay.exe --disable-gpu              # 禁用GPU加速，使用GDI渲染\n"
         L"  TimeDisplay.exe --font-path \"myfont.ttf\" --font-name \"MyFont\"  # 加载外部字体\n"
         L"===========================================================\n"
         L"\n【项目信息】\n"
@@ -445,6 +462,16 @@ void CreateDynamicFonts(HWND hWnd) {
         SendMessageW(hSyncBtn,       WM_SETFONT, (WPARAM)hBtnFont, FALSE);
         SendMessageW(hTopmostBtn,    WM_SETFONT, (WPARAM)hBtnFont, FALSE);
         hNormalFont = hBtnFont;
+    }
+
+    // 同步更新 GPU 渲染器的文本格式
+    if (g_useGpu) {
+        FontSizes gpuSizes = CalculateFontSizes(hWnd);
+        const wchar_t* gpuFontFamily = !g_fontFamilyToUse.empty() ? g_fontFamilyToUse.c_str() :
+            (g_useEmbeddedFont ? FONT_FAMILY_EMBEDDED : FONT_FAMILY_FALLBACK);
+        g_gpuRenderer.SetTextFormats(gpuFontFamily,
+            (float)gpuSizes.time, (float)gpuSizes.date,
+            (float)gpuSizes.week, (float)gpuSizes.source);
     }
 }
 
@@ -730,6 +757,9 @@ int WINAPI wWinMain(_In_ HINSTANCE hInstance,
                     return 1;
                 }
             }
+            else if (wcscmp(argv[i], L"--disable-gpu") == 0) {
+                g_disableGpu = true;
+            }
             else {
                 // 无法识别的参数 → 报错并退出
                 wchar_t errMsg[256];
@@ -908,6 +938,23 @@ int WINAPI wWinMain(_In_ HINSTANCE hInstance,
     CreateDynamicFonts(hMainWindow);
     InitializeFullscreenModule(hMainWindow);
 
+    // ===== 初始化 GPU 渲染器 =====
+    g_useGpu = g_gpuRenderer.Initialize(hMainWindow, g_disableGpu);
+    if (g_useGpu) {
+        // GPU 渲染器就绪 → 创建 DirectWrite 文本格式
+        FontSizes gpuSizes = CalculateFontSizes(hMainWindow);
+        const wchar_t* gpuFontFamily = !g_fontFamilyToUse.empty() ? g_fontFamilyToUse.c_str() :
+            (g_useEmbeddedFont ? FONT_FAMILY_EMBEDDED : FONT_FAMILY_FALLBACK);
+        g_gpuRenderer.SetTextFormats(gpuFontFamily,
+            (float)gpuSizes.time, (float)gpuSizes.date,
+            (float)gpuSizes.week, (float)gpuSizes.source);
+        wchar_t gpuMsg[128];
+        swprintf(gpuMsg, 128,
+            L"[TimeDisplay] GPU 渲染器已启用（%s）\n",
+            g_gpuRenderer.IsHardwareAccelerated() ? L"硬件加速" : L"软件模式");
+        OutputDebugStringW(gpuMsg);
+    }
+
     if (g_startTopmost) {
         g_topmost = true;
         SetWindowLong(hMainWindow, GWL_EXSTYLE, GetWindowLong(hMainWindow, GWL_EXSTYLE) | WS_EX_TOPMOST);
@@ -946,10 +993,175 @@ int WINAPI wWinMain(_In_ HINSTANCE hInstance,
 
     CleanupNTPClient();
     CleanupFullscreenModule();
+    g_gpuRenderer.Cleanup();
 
     return (int)msg.wParam;
 }
 
+// ====================================================================
+// GDI 渲染路径（回退/默认）
+// ====================================================================
+static void PaintWithGDI(HWND hWnd, HDC hdc, const RECT& clientRect) {
+    int width = clientRect.right - clientRect.left;
+    int height = clientRect.bottom - clientRect.top;
+
+    HDC memDC = CreateCompatibleDC(hdc);
+    HBITMAP memBitmap = CreateCompatibleBitmap(hdc, width, height);
+    HBITMAP oldBitmap = (HBITMAP)SelectObject(memDC, memBitmap);
+
+    HBRUSH hBrush = CreateSolidBrush(RGB(10, 10, 20));
+    FillRect(memDC, &clientRect, hBrush);
+    DeleteObject(hBrush);
+
+    std::wstring sourceText = GetTimeSourceString();
+    if (!sourceText.empty()) {
+        HGDIOBJ hOldSourceFont = SelectObject(memDC, hSourceFont);
+        TEXTMETRIC tm;
+        GetTextMetrics(memDC, &tm);
+        int sourceHeight = tm.tmHeight + 6;
+        RECT sourceRect = clientRect;
+        sourceRect.left = 12;
+        sourceRect.top = 8;
+        sourceRect.right = clientRect.right - 12;
+        sourceRect.bottom = sourceRect.top + sourceHeight;
+
+        SetTextColor(memDC, RGB(140, 140, 160));
+        SetBkMode(memDC, TRANSPARENT);
+        DrawTextW(memDC, sourceText.c_str(), -1, &sourceRect,
+            DT_LEFT | DT_TOP | DT_NOPREFIX | DT_SINGLELINE);
+        SelectObject(memDC, hOldSourceFont);
+    }
+
+    std::wstring timeDateStr = GetTimeDateString();
+    size_t firstNewLine = timeDateStr.find(L'\n');
+    size_t secondNewLine = timeDateStr.find(L'\n', firstNewLine + 1);
+    std::wstring timeStr = timeDateStr.substr(0, firstNewLine);
+    std::wstring dateStr = timeDateStr.substr(firstNewLine + 1, secondNewLine - firstNewLine - 1);
+    std::wstring weekStr = timeDateStr.substr(secondNewLine + 1);
+
+    int windowHeight = clientRect.bottom - clientRect.top;
+    int timeHeight = windowHeight / 3;
+    int dateHeight = windowHeight / 8;
+    int weekHeight = windowHeight / 8;
+    int totalHeight = timeHeight + dateHeight + weekHeight + 20;
+    int startY = (windowHeight - totalHeight) / 2 - 20;
+
+    RECT timeRect = clientRect;
+    timeRect.top = startY; timeRect.bottom = startY + timeHeight;
+    HGDIOBJ hOldFont = SelectObject(memDC, hLargeFont);
+    SetTextColor(memDC, RGB(220, 220, 255));
+    SetBkMode(memDC, TRANSPARENT);
+    DrawTextW(memDC, timeStr.c_str(), -1, &timeRect,
+        DT_CENTER | DT_VCENTER | DT_NOPREFIX | DT_SINGLELINE);
+
+    RECT dateRect = clientRect;
+    dateRect.top = startY + timeHeight + 10; dateRect.bottom = dateRect.top + dateHeight;
+    HGDIOBJ hOldDateFont = SelectObject(memDC, hDateFont);
+    SetTextColor(memDC, RGB(200, 200, 240));
+    DrawTextW(memDC, dateStr.c_str(), -1, &dateRect,
+        DT_CENTER | DT_VCENTER | DT_NOPREFIX | DT_SINGLELINE);
+
+    RECT weekRect = clientRect;
+    weekRect.top = dateRect.bottom + 10; weekRect.bottom = weekRect.top + weekHeight;
+    SetTextColor(memDC, RGB(180, 180, 220));
+    DrawTextW(memDC, weekStr.c_str(), -1, &weekRect,
+        DT_CENTER | DT_VCENTER | DT_NOPREFIX | DT_SINGLELINE);
+
+    SelectObject(memDC, hOldDateFont);
+    SelectObject(memDC, hOldFont);
+    BitBlt(hdc, 0, 0, width, height, memDC, 0, 0, SRCCOPY);
+
+    SelectObject(memDC, oldBitmap);
+    DeleteObject(memBitmap);
+    DeleteDC(memDC);
+}
+
+// ====================================================================
+// Direct2D GPU 渲染路径
+// ====================================================================
+static bool PaintWithGPU(HWND hWnd, const RECT& clientRect) {
+    if (!g_useGpu) return false;
+
+    int width = clientRect.right - clientRect.left;
+    int height = clientRect.bottom - clientRect.top;
+    if (width <= 0 || height <= 0) return false;
+
+    if (!g_gpuRenderer.BeginDraw()) {
+        g_useGpu = false;
+        OutputDebugStringW(L"[TimeDisplay] GPU 渲染器不可用，回退到 GDI\n");
+        return false;
+    }
+
+    // 绘制深色背景
+    g_gpuRenderer.ClearBackground(
+        D2D1::ColorF(10.0f / 255.0f, 10.0f / 255.0f, 20.0f / 255.0f));
+
+    // 绘制时间来源标签
+    std::wstring sourceText = GetTimeSourceString();
+    if (!sourceText.empty() && g_gpuRenderer.GetSourceFormat()) {
+        D2D1_RECT_F sourceRect = D2D1::RectF(
+            12.0f, 8.0f,
+            (float)width - 12.0f, 38.0f);
+        g_gpuRenderer.DrawTextTopLeft(sourceText, g_gpuRenderer.GetSourceFormat(),
+            sourceRect,
+            D2D1::ColorF(140.0f / 255.0f, 140.0f / 255.0f, 160.0f / 255.0f));
+    }
+
+    // 解析时间/日期/星期字符串
+    std::wstring timeDateStr = GetTimeDateString();
+    size_t firstNewLine = timeDateStr.find(L'\n');
+    size_t secondNewLine = timeDateStr.find(L'\n', firstNewLine + 1);
+    std::wstring timeStr = timeDateStr.substr(0, firstNewLine);
+    std::wstring dateStr = timeDateStr.substr(firstNewLine + 1, secondNewLine - firstNewLine - 1);
+    std::wstring weekStr = timeDateStr.substr(secondNewLine + 1);
+
+    // 计算各文本区域（与 GDI 保持一致）
+    int windowHeight = height;
+    float timeHeight = (float)(windowHeight / 3);
+    float dateHeight = (float)(windowHeight / 8);
+    float weekHeight = (float)(windowHeight / 8);
+    float totalHeight = timeHeight + dateHeight + weekHeight + 20.0f;
+    float startY = ((float)windowHeight - totalHeight) / 2.0f - 20.0f;
+
+    // 绘制时间（大号，粗体）
+    D2D1_RECT_F timeRect = D2D1::RectF(
+        0, startY,
+        (float)width, startY + timeHeight);
+    g_gpuRenderer.DrawTextCentered(timeStr, g_gpuRenderer.GetTimeFormat(),
+        timeRect,
+        D2D1::ColorF(220.0f / 255.0f, 220.0f / 255.0f, 255.0f / 255.0f));
+
+    // 绘制日期（中号）
+    D2D1_RECT_F dateRect = D2D1::RectF(
+        0, startY + timeHeight + 10.0f,
+        (float)width, startY + timeHeight + 10.0f + dateHeight);
+    g_gpuRenderer.DrawTextCentered(dateStr, g_gpuRenderer.GetDateFormat(),
+        dateRect,
+        D2D1::ColorF(200.0f / 255.0f, 200.0f / 255.0f, 240.0f / 255.0f));
+
+    // 绘制星期（中号）
+    D2D1_RECT_F weekRect = D2D1::RectF(
+        0, dateRect.bottom + 10.0f,
+        (float)width, dateRect.bottom + 10.0f + weekHeight);
+    g_gpuRenderer.DrawTextCentered(weekStr, g_gpuRenderer.GetWeekFormat(),
+        weekRect,
+        D2D1::ColorF(180.0f / 255.0f, 180.0f / 255.0f, 220.0f / 255.0f));
+
+    // 提交渲染
+    if (!g_gpuRenderer.EndDraw()) {
+        g_useGpu = g_gpuRenderer.IsInitialized();
+        if (!g_useGpu) {
+            OutputDebugStringW(L"[TimeDisplay] GPU 渲染器失效，回退到 GDI\n");
+        }
+        return g_useGpu;
+    }
+
+    return true;
+}
+
+// ====================================================================
+// 窗口过程
+// ====================================================================
 LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) {
     switch (message) {
     case WM_CREATE: {
@@ -1021,6 +1233,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) 
 
     case WM_SIZE: {
         UpdateButtonLayout(hWnd);
+        if (g_useGpu) g_gpuRenderer.Resize();
         InvalidateRect(hWnd, NULL, FALSE);
         break;
     }
@@ -1035,73 +1248,14 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) 
 
         if (width <= 0 || height <= 0) { EndPaint(hWnd, &ps); break; }
 
-        HDC memDC = CreateCompatibleDC(hdc);
-        HBITMAP memBitmap = CreateCompatibleBitmap(hdc, width, height);
-        HBITMAP oldBitmap = (HBITMAP)SelectObject(memDC, memBitmap);
-
-        HBRUSH hBrush = CreateSolidBrush(RGB(10, 10, 20));
-        FillRect(memDC, &clientRect, hBrush);
-        DeleteObject(hBrush);
-
-        std::wstring sourceText = GetTimeSourceString();
-        if (!sourceText.empty()) {
-            // 动态计算来源文字所需高度
-            HGDIOBJ hOldSourceFont = SelectObject(memDC, hSourceFont);
-            TEXTMETRIC tm;
-            GetTextMetrics(memDC, &tm);
-            int sourceHeight = tm.tmHeight + 6; // 字体高度 + 少量边距
-            RECT sourceRect = clientRect;
-            sourceRect.left = 12;
-            sourceRect.top = 8;
-            sourceRect.right = clientRect.right - 12;
-            sourceRect.bottom = sourceRect.top + sourceHeight;
-
-            SetTextColor(memDC, RGB(140, 140, 160));
-            SetBkMode(memDC, TRANSPARENT);
-            DrawTextW(memDC, sourceText.c_str(), -1, &sourceRect,
-                DT_LEFT | DT_TOP | DT_NOPREFIX | DT_SINGLELINE);
-            SelectObject(memDC, hOldSourceFont);
+        // GPU 渲染路径（优先）
+        if (g_useGpu && PaintWithGPU(hWnd, clientRect)) {
+            // GPU 渲染成功，跳过 GDI 路径
+        } else {
+            // GDI 渲染路径（默认/回退）
+            PaintWithGDI(hWnd, hdc, clientRect);
         }
 
-        std::wstring timeDateStr = GetTimeDateString();
-        size_t firstNewLine = timeDateStr.find(L'\n');
-        size_t secondNewLine = timeDateStr.find(L'\n', firstNewLine + 1);
-        std::wstring timeStr = timeDateStr.substr(0, firstNewLine);
-        std::wstring dateStr = timeDateStr.substr(firstNewLine + 1, secondNewLine - firstNewLine - 1);
-        std::wstring weekStr = timeDateStr.substr(secondNewLine + 1);
-
-        int windowHeight = clientRect.bottom - clientRect.top;
-        int timeHeight = windowHeight / 3;
-        int dateHeight = windowHeight / 8;
-        int weekHeight = windowHeight / 8;
-        int totalHeight = timeHeight + dateHeight + weekHeight + 20;
-        int startY = (windowHeight - totalHeight) / 2 - 20;
-
-        RECT timeRect = clientRect;
-        timeRect.top = startY; timeRect.bottom = startY + timeHeight;
-        HGDIOBJ hOldFont = SelectObject(memDC, hLargeFont);
-        SetTextColor(memDC, RGB(220, 220, 255));
-        SetBkMode(memDC, TRANSPARENT);
-        DrawTextW(memDC, timeStr.c_str(), -1, &timeRect, DT_CENTER | DT_VCENTER | DT_NOPREFIX | DT_SINGLELINE);
-
-        RECT dateRect = clientRect;
-        dateRect.top = startY + timeHeight + 10; dateRect.bottom = dateRect.top + dateHeight;
-        HGDIOBJ hOldDateFont = SelectObject(memDC, hDateFont);
-        SetTextColor(memDC, RGB(200, 200, 240));
-        DrawTextW(memDC, dateStr.c_str(), -1, &dateRect, DT_CENTER | DT_VCENTER | DT_NOPREFIX | DT_SINGLELINE);
-
-        RECT weekRect = clientRect;
-        weekRect.top = dateRect.bottom + 10; weekRect.bottom = weekRect.top + weekHeight;
-        SetTextColor(memDC, RGB(180, 180, 220));
-        DrawTextW(memDC, weekStr.c_str(), -1, &weekRect, DT_CENTER | DT_VCENTER | DT_NOPREFIX | DT_SINGLELINE);
-
-        SelectObject(memDC, hOldDateFont);
-        SelectObject(memDC, hOldFont);
-        BitBlt(hdc, 0, 0, width, height, memDC, 0, 0, SRCCOPY);
-
-        SelectObject(memDC, oldBitmap);
-        DeleteObject(memBitmap);
-        DeleteDC(memDC);
         EndPaint(hWnd, &ps);
         break;
     }
