@@ -18,6 +18,7 @@
 #include <atomic>
 #include <cstdio>
 #include <cstdlib>
+#include "d2d_renderer.h"
 #include "fullscreen.h"
 #include "ntp_client.h"
 #include "resource.h"
@@ -526,6 +527,12 @@ FontSizes CalculateFontSizes(HWND hWnd) {
     return sizes;
 }
 
+static const wchar_t* GetActiveFontFamily() {
+    if (!g_fontFamilyToUse.empty()) return g_fontFamilyToUse.c_str();
+    if (g_useEmbeddedFont) return FONT_FAMILY_EMBEDDED;
+    return FONT_FAMILY_FALLBACK;
+}
+
 // 检查字符串是否为纯数字（允许可选的负号开头）
 static bool IsNumericString(const wchar_t* str) {
     if (!str || *str == L'\0') return false;
@@ -908,6 +915,10 @@ int WINAPI wWinMain(_In_ HINSTANCE hInstance,
     CreateDynamicFonts(hMainWindow);
     InitializeFullscreenModule(hMainWindow);
 
+    if (!D2DRenderer_Init(hMainWindow)) {
+        OutputDebugStringW(L"Direct2D GPU 渲染器初始化失败，将使用 GDI 软渲染回退\n");
+    }
+
     if (g_startTopmost) {
         g_topmost = true;
         SetWindowLong(hMainWindow, GWL_EXSTYLE, GetWindowLong(hMainWindow, GWL_EXSTYLE) | WS_EX_TOPMOST);
@@ -946,6 +957,7 @@ int WINAPI wWinMain(_In_ HINSTANCE hInstance,
 
     CleanupNTPClient();
     CleanupFullscreenModule();
+    D2DRenderer_Cleanup();
 
     return (int)msg.wParam;
 }
@@ -984,6 +996,11 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) 
             newRect->bottom - newRect->top,
             SWP_NOZORDER | SWP_NOACTIVATE);
         UpdateButtonLayout(hWnd);
+        if (D2DRenderer_IsAvailable()) {
+            RECT clientRect;
+            GetClientRect(hWnd, &clientRect);
+            D2DRenderer_OnResize(hWnd, clientRect.right - clientRect.left, clientRect.bottom - clientRect.top);
+        }
         return 0;
     }
 
@@ -1021,6 +1038,11 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) 
 
     case WM_SIZE: {
         UpdateButtonLayout(hWnd);
+        if (D2DRenderer_IsAvailable()) {
+            RECT rc;
+            GetClientRect(hWnd, &rc);
+            D2DRenderer_OnResize(hWnd, rc.right - rc.left, rc.bottom - rc.top);
+        }
         InvalidateRect(hWnd, NULL, FALSE);
         break;
     }
@@ -1035,34 +1057,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) 
 
         if (width <= 0 || height <= 0) { EndPaint(hWnd, &ps); break; }
 
-        HDC memDC = CreateCompatibleDC(hdc);
-        HBITMAP memBitmap = CreateCompatibleBitmap(hdc, width, height);
-        HBITMAP oldBitmap = (HBITMAP)SelectObject(memDC, memBitmap);
-
-        HBRUSH hBrush = CreateSolidBrush(RGB(10, 10, 20));
-        FillRect(memDC, &clientRect, hBrush);
-        DeleteObject(hBrush);
-
         std::wstring sourceText = GetTimeSourceString();
-        if (!sourceText.empty()) {
-            // 动态计算来源文字所需高度
-            HGDIOBJ hOldSourceFont = SelectObject(memDC, hSourceFont);
-            TEXTMETRIC tm;
-            GetTextMetrics(memDC, &tm);
-            int sourceHeight = tm.tmHeight + 6; // 字体高度 + 少量边距
-            RECT sourceRect = clientRect;
-            sourceRect.left = 12;
-            sourceRect.top = 8;
-            sourceRect.right = clientRect.right - 12;
-            sourceRect.bottom = sourceRect.top + sourceHeight;
-
-            SetTextColor(memDC, RGB(140, 140, 160));
-            SetBkMode(memDC, TRANSPARENT);
-            DrawTextW(memDC, sourceText.c_str(), -1, &sourceRect,
-                DT_LEFT | DT_TOP | DT_NOPREFIX | DT_SINGLELINE);
-            SelectObject(memDC, hOldSourceFont);
-        }
-
         std::wstring timeDateStr = GetTimeDateString();
         size_t firstNewLine = timeDateStr.find(L'\n');
         size_t secondNewLine = timeDateStr.find(L'\n', firstNewLine + 1);
@@ -1070,38 +1065,82 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) 
         std::wstring dateStr = timeDateStr.substr(firstNewLine + 1, secondNewLine - firstNewLine - 1);
         std::wstring weekStr = timeDateStr.substr(secondNewLine + 1);
 
-        int windowHeight = clientRect.bottom - clientRect.top;
-        int timeHeight = windowHeight / 3;
-        int dateHeight = windowHeight / 8;
-        int weekHeight = windowHeight / 8;
-        int totalHeight = timeHeight + dateHeight + weekHeight + 20;
-        int startY = (windowHeight - totalHeight) / 2 - 20;
+        if (D2DRenderer_IsAvailable()) {
+            FontSizes fz = CalculateFontSizes(hWnd);
+            D2DRenderInfo info;
+            info.timeStr      = timeStr.c_str();
+            info.dateStr      = dateStr.c_str();
+            info.weekStr      = weekStr.c_str();
+            info.sourceStr    = sourceText.c_str();
+            info.fontFamily   = GetActiveFontFamily();
+            info.timeFontSize   = fz.time;
+            info.dateFontSize   = fz.date;
+            info.weekFontSize   = fz.week;
+            info.sourceFontSize = fz.source;
+            info.boldTime       = true;
+            D2DRenderer_Render(hWnd, info);
+        }
+        else {
+            HDC memDC = CreateCompatibleDC(hdc);
+            HBITMAP memBitmap = CreateCompatibleBitmap(hdc, width, height);
+            HBITMAP oldBitmap = (HBITMAP)SelectObject(memDC, memBitmap);
 
-        RECT timeRect = clientRect;
-        timeRect.top = startY; timeRect.bottom = startY + timeHeight;
-        HGDIOBJ hOldFont = SelectObject(memDC, hLargeFont);
-        SetTextColor(memDC, RGB(220, 220, 255));
-        SetBkMode(memDC, TRANSPARENT);
-        DrawTextW(memDC, timeStr.c_str(), -1, &timeRect, DT_CENTER | DT_VCENTER | DT_NOPREFIX | DT_SINGLELINE);
+            HBRUSH hBrush = CreateSolidBrush(RGB(10, 10, 20));
+            FillRect(memDC, &clientRect, hBrush);
+            DeleteObject(hBrush);
 
-        RECT dateRect = clientRect;
-        dateRect.top = startY + timeHeight + 10; dateRect.bottom = dateRect.top + dateHeight;
-        HGDIOBJ hOldDateFont = SelectObject(memDC, hDateFont);
-        SetTextColor(memDC, RGB(200, 200, 240));
-        DrawTextW(memDC, dateStr.c_str(), -1, &dateRect, DT_CENTER | DT_VCENTER | DT_NOPREFIX | DT_SINGLELINE);
+            if (!sourceText.empty()) {
+                // 动态计算来源文字所需高度
+                HGDIOBJ hOldSourceFont = SelectObject(memDC, hSourceFont);
+                TEXTMETRIC tm;
+                GetTextMetrics(memDC, &tm);
+                int sourceHeight = tm.tmHeight + 6; // 字体高度 + 少量边距
+                RECT sourceRect = clientRect;
+                sourceRect.left = 12;
+                sourceRect.top = 8;
+                sourceRect.right = clientRect.right - 12;
+                sourceRect.bottom = sourceRect.top + sourceHeight;
 
-        RECT weekRect = clientRect;
-        weekRect.top = dateRect.bottom + 10; weekRect.bottom = weekRect.top + weekHeight;
-        SetTextColor(memDC, RGB(180, 180, 220));
-        DrawTextW(memDC, weekStr.c_str(), -1, &weekRect, DT_CENTER | DT_VCENTER | DT_NOPREFIX | DT_SINGLELINE);
+                SetTextColor(memDC, RGB(140, 140, 160));
+                SetBkMode(memDC, TRANSPARENT);
+                DrawTextW(memDC, sourceText.c_str(), -1, &sourceRect,
+                    DT_LEFT | DT_TOP | DT_NOPREFIX | DT_SINGLELINE);
+                SelectObject(memDC, hOldSourceFont);
+            }
 
-        SelectObject(memDC, hOldDateFont);
-        SelectObject(memDC, hOldFont);
-        BitBlt(hdc, 0, 0, width, height, memDC, 0, 0, SRCCOPY);
+            int windowHeight = clientRect.bottom - clientRect.top;
+            int timeHeight = windowHeight / 3;
+            int dateHeight = windowHeight / 8;
+            int weekHeight = windowHeight / 8;
+            int totalHeight = timeHeight + dateHeight + weekHeight + 20;
+            int startY = (windowHeight - totalHeight) / 2 - 20;
 
-        SelectObject(memDC, oldBitmap);
-        DeleteObject(memBitmap);
-        DeleteDC(memDC);
+            RECT timeRect = clientRect;
+            timeRect.top = startY; timeRect.bottom = startY + timeHeight;
+            HGDIOBJ hOldFont = SelectObject(memDC, hLargeFont);
+            SetTextColor(memDC, RGB(220, 220, 255));
+            SetBkMode(memDC, TRANSPARENT);
+            DrawTextW(memDC, timeStr.c_str(), -1, &timeRect, DT_CENTER | DT_VCENTER | DT_NOPREFIX | DT_SINGLELINE);
+
+            RECT dateRect = clientRect;
+            dateRect.top = startY + timeHeight + 10; dateRect.bottom = dateRect.top + dateHeight;
+            HGDIOBJ hOldDateFont = SelectObject(memDC, hDateFont);
+            SetTextColor(memDC, RGB(200, 200, 240));
+            DrawTextW(memDC, dateStr.c_str(), -1, &dateRect, DT_CENTER | DT_VCENTER | DT_NOPREFIX | DT_SINGLELINE);
+
+            RECT weekRect = clientRect;
+            weekRect.top = dateRect.bottom + 10; weekRect.bottom = weekRect.top + weekHeight;
+            SetTextColor(memDC, RGB(180, 180, 220));
+            DrawTextW(memDC, weekStr.c_str(), -1, &weekRect, DT_CENTER | DT_VCENTER | DT_NOPREFIX | DT_SINGLELINE);
+
+            SelectObject(memDC, hOldDateFont);
+            SelectObject(memDC, hOldFont);
+            BitBlt(hdc, 0, 0, width, height, memDC, 0, 0, SRCCOPY);
+
+            SelectObject(memDC, oldBitmap);
+            DeleteObject(memBitmap);
+            DeleteDC(memDC);
+        }
         EndPaint(hWnd, &ps);
         break;
     }
