@@ -226,8 +226,10 @@
     <ClCompile Include="main.cpp" />
     <ClCompile Include="fullscreen.cpp" />
     <ClCompile Include="ntp_client.cpp" />
+    <ClCompile Include="d2d_renderer.cpp" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="d2d_renderer.h" />
     <ClInclude Include="fullscreen.h" />
     <ClInclude Include="help.h" />
     <ClInclude Include="ntp_client.h" />
