@@ -19,3 +19,4 @@ void D2DRenderer_Cleanup();
 void D2DRenderer_OnResize(HWND hWnd, int width, int height);
 bool D2DRenderer_Render(HWND hWnd, const D2DRenderInfo& info);
 bool D2DRenderer_IsAvailable();
+void D2DRenderer_ForceSoftwareRendering(bool enable);

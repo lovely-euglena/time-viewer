@@ -30,6 +30,7 @@ namespace {
     IDWriteTextFormat*     g_fmtSource     = nullptr;
 
     bool g_initialized = false;
+    bool g_softwareMode = false;       // 是否为软件渲染模式
 
     // 格式缓存验证参数（上一次创建时的值）
     int    g_cacheTimeSize   = 0;
@@ -96,6 +97,10 @@ namespace {
 
 // ===== 公开接口 =====
 
+void D2DRenderer_ForceSoftwareRendering(bool enable) {
+    g_softwareMode = enable;
+}
+
 bool D2DRenderer_Init(HWND hWnd) {
     if (g_initialized) return true;
     if (!hWnd || !IsWindow(hWnd)) return false;
@@ -125,15 +130,35 @@ bool D2DRenderer_Init(HWND hWnd) {
 
     float dpi = GetWindowDpiValue(hWnd);
 
+    // 尝试硬件加速渲染，失败时自动回退到软件渲染
+    D2D1_RENDER_TARGET_TYPE rtType = D2D1_RENDER_TARGET_TYPE_DEFAULT;
+    if (g_softwareMode) {
+        rtType = D2D1_RENDER_TARGET_TYPE_SOFTWARE;
+    }
+
     D2D1_RENDER_TARGET_PROPERTIES rtProps = D2D1::RenderTargetProperties(
-        D2D1_RENDER_TARGET_TYPE_DEFAULT,
-        D2D1::PixelFormat(DXGI_FORMAT_UNKNOWN, D2D1_ALPHA_MODE_IGNORE),
+        rtType,
+        D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_IGNORE),
         dpi, dpi);
 
     hr = g_d2dFactory->CreateHwndRenderTarget(
         rtProps,
         D2D1::HwndRenderTargetProperties(hWnd, D2D1::SizeU(w, h)),
         &g_renderTarget);
+
+    // 硬件加速失败 → 自动回退到软件渲染
+    if ((FAILED(hr) || !g_renderTarget) && !g_softwareMode) {
+        rtProps.type = D2D1_RENDER_TARGET_TYPE_SOFTWARE;
+        hr = g_d2dFactory->CreateHwndRenderTarget(
+            rtProps,
+            D2D1::HwndRenderTargetProperties(hWnd, D2D1::SizeU(w, h)),
+            &g_renderTarget);
+        if (SUCCEEDED(hr) && g_renderTarget) {
+            g_softwareMode = true;
+            OutputDebugStringW(L"D2D: 已回退到软件渲染模式\n");
+        }
+    }
+
     if (FAILED(hr) || !g_renderTarget) {
         SafeRelease(g_dwriteFactory);
         SafeRelease(g_d2dFactory);
@@ -206,8 +231,7 @@ bool D2DRenderer_Render(HWND hWnd, const D2DRenderInfo& info) {
     float h = rtSize.height;
     if (w <= 0 || h <= 0) return false;
 
-    float dpi = 96.0f;
-    g_renderTarget->GetDpi(&dpi, nullptr);
+    float dpi = GetWindowDpiValue(hWnd);
     float scale = dpi / 96.0f;
     auto pxToDip = [&](int px) -> float { return (float)px / scale; };
 
@@ -271,7 +295,7 @@ bool D2DRenderer_Render(HWND hWnd, const D2DRenderInfo& info) {
         g_renderTarget->DrawTextW(
             info.sourceStr, (UINT32)wcslen(info.sourceStr),
             g_fmtSource, &srcRect, g_brushSource,
-            D2D1_DRAW_TEXT_OPTIONS_ENABLE_CLIP_PER_GLYPH);
+            D2D1_DRAW_TEXT_OPTIONS_NONE);
     }
 
     float timeH  = h / 3.0f;
@@ -285,7 +309,7 @@ bool D2DRenderer_Render(HWND hWnd, const D2DRenderInfo& info) {
         g_renderTarget->DrawTextW(
             info.timeStr, (UINT32)wcslen(info.timeStr),
             g_fmtTime, &rect, g_brushTime,
-            D2D1_DRAW_TEXT_OPTIONS_ENABLE_CLIP_PER_GLYPH);
+            D2D1_DRAW_TEXT_OPTIONS_NONE);
     }
 
     if (info.dateStr && info.dateStr[0]) {
@@ -294,7 +318,7 @@ bool D2DRenderer_Render(HWND hWnd, const D2DRenderInfo& info) {
         g_renderTarget->DrawTextW(
             info.dateStr, (UINT32)wcslen(info.dateStr),
             g_fmtDate, &rect, g_brushDate,
-            D2D1_DRAW_TEXT_OPTIONS_ENABLE_CLIP_PER_GLYPH);
+            D2D1_DRAW_TEXT_OPTIONS_NONE);
     }
 
     if (info.weekStr && info.weekStr[0]) {
@@ -303,7 +327,7 @@ bool D2DRenderer_Render(HWND hWnd, const D2DRenderInfo& info) {
         g_renderTarget->DrawTextW(
             info.weekStr, (UINT32)wcslen(info.weekStr),
             g_fmtWeek, &rect, g_brushWeek,
-            D2D1_DRAW_TEXT_OPTIONS_ENABLE_CLIP_PER_GLYPH);
+            D2D1_DRAW_TEXT_OPTIONS_NONE);
     }
 
     HRESULT hrEnd = g_renderTarget->EndDraw();
