@@ -109,39 +109,39 @@
     <OutDir>$(SolutionDir)$(Configuration)\$(PlatformShortcut)\</OutDir>
     <IntDir>$(Configuration)\$(PlatformShortcut)\</IntDir>
     <LinkIncremental>true</LinkIncremental>
-    <TargetName>$(Configuration)-$(ProjectName)-$(PlatformTarget)-</TargetName>
+    <TargetName>$(ProjectName)-$(Configuration)-$(PlatformTarget)-</TargetName>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
     <OutDir>$(SolutionDir)$(Configuration)\$(PlatformShortcut)\</OutDir>
     <IntDir>$(Configuration)\$(PlatformShortcut)\</IntDir>
     <LinkIncremental>false</LinkIncremental>
     <LinkKeyFile>$(ProjectDir)certificate.pfx</LinkKeyFile>
-    <TargetName>$(Configuration)-$(ProjectName)-$(PlatformTarget)-</TargetName>
+    <TargetName>$(ProjectName)-$(Configuration)-$(PlatformTarget)-</TargetName>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release-Full|Win32'">
     <OutDir>$(SolutionDir)$(Configuration)\$(PlatformShortcut)\</OutDir>
     <IntDir>$(Configuration)\$(PlatformShortcut)\</IntDir>
     <LinkIncremental>false</LinkIncremental>
     <LinkKeyFile>$(ProjectDir)certificate.pfx</LinkKeyFile>
-    <TargetName>$(Configuration)-$(ProjectName)-$(PlatformTarget)-</TargetName>
+    <TargetName>$(ProjectName)-$(Configuration)-$(PlatformTarget)-</TargetName>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <OutDir>$(SolutionDir)$(Configuration)\$(PlatformShortcut)\</OutDir>
     <IntDir>$(Configuration)\$(PlatformShortcut)\</IntDir>
     <LinkIncremental>true</LinkIncremental>
-    <TargetName>$(Configuration)-$(ProjectName)-$(PlatformTarget)-</TargetName>
+    <TargetName>$(ProjectName)-$(Configuration)-$(PlatformTarget)-</TargetName>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <OutDir>$(SolutionDir)$(Configuration)\$(PlatformShortcut)\</OutDir>
     <IntDir>$(Configuration)\$(PlatformShortcut)\</IntDir>
     <LinkIncremental>false</LinkIncremental>
-    <TargetName>$(Configuration)-$(ProjectName)-$(PlatformTarget)-</TargetName>
+    <TargetName>$(ProjectName)-$(Configuration)-$(PlatformTarget)-</TargetName>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release-Full|x64'">
     <OutDir>$(SolutionDir)$(Configuration)\$(PlatformShortcut)\</OutDir>
     <IntDir>$(Configuration)\$(PlatformShortcut)\</IntDir>
     <LinkIncremental>false</LinkIncremental>
-    <TargetName>$(Configuration)-$(ProjectName)-$(PlatformTarget)-</TargetName>
+    <TargetName>$(ProjectName)-$(Configuration)-$(PlatformTarget)-</TargetName>
   </PropertyGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
     <ClCompile>
