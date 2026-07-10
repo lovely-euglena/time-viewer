@@ -17,12 +17,14 @@
 - **触摸支持**：支持触摸操作，可用于触摸屏设备
 - **DPI 感知**：支持高 DPI 显示（Per-Monitor V2），确保在不同分辨率下清晰显示
 - **动态字体**：根据窗口大小自动调整字体大小，拖动窗口时字体实时跟随变化
-- **平滑拖拽**：采用 DWM 离屏缓冲技术，窗口拖动时按钮无闪烁、内容平滑刷新
+- **D2D 加速渲染**：使用 Direct2D/DirectWrite GPU 硬件加速渲染，性能优于传统 GDI
+- **自动降级**：GPU 不可用时自动回退到 D2D 软件渲染或 GDI 软渲染，兼容 Windows 7~11
+- **DLL 动态加载**：d2d1.dll/dwrite.dll 运行时动态加载，避免导入库版本与系统 DLL 不匹配
 - **命令行选项**：支持丰富的命令行启动参数
 
 ## 系统要求
 
-- Windows 7 或更高版本
+- Windows 7 或更高版本（Direct2D 需要 KB971644 平台更新）
 - Visual Studio 2019 / 2022 / 2026（推荐，使用 v142/v143/v145 工具集）
 - Windows SDK 10.0+
 
@@ -84,6 +86,7 @@ TimeDisplay.exe --font-path "myfont.ttf" --font-name "MyFont"  # 加载外部字
 
 ```
 ├── main.cpp                 # 主程序逻辑，窗口创建、时间显示、事件处理
+├── d2d_renderer.cpp/h       # Direct2D/DirectWrite 渲染器（硬件加速 + 软件回退）
 ├── fullscreen.cpp/h         # 全屏模式管理
 ├── help.cpp/h               # 帮助信息与版本信息显示模块
 ├── ntp_client.cpp/h         # NTP 客户端实现，用于网络时间同步
@@ -99,9 +102,24 @@ TimeDisplay.exe --font-path "myfont.ttf" --font-name "MyFont"  # 加载外部字
 
 - Win32 API
 - C++17 (多线程、原子操作)
+- Direct2D / DirectWrite（硬件加速 GPU 渲染 + 软件回退）
 - NTP 协议 (RFC 4330)
 - Windows Socket (winsock2)
-- DWM (离屏缓冲、窗口圆角、毛玻璃效果)
+- DWM (窗口圆角)
+
+## 兼容性说明
+
+D2D 渲染器采用 **运行时动态加载**（`LoadLibrary` + `GetProcAddress`）方式加载 `d2d1.dll` / `dwrite.dll`，而非编译期静态链接。这意味着：
+
+| 场景 | 表现 |
+|------|------|
+| Windows 10/11（有 GPU） | D2D 硬件加速渲染 |
+| Windows 10/11（无 GPU / 远程桌面） | 自动回退到 D2D 软件渲染（WARP）或 GDI |
+| Windows 7 + KB971644 | D2D 硬件加速渲染 |
+| Windows 7 无平台更新 | D2D 不可用 → 自动走 GDI 回退 |
+| 任意平台 GPU 驱动崩溃 | `D2DERR_RECREATE_TARGET` 自动重建资源 |
+
+D2D 回退到 GDI 后，所有功能完全正常，仅渲染方式从 GPU 加速切换为 CPU 软渲染。
 
 ## 许可证
 

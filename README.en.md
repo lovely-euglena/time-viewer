@@ -14,12 +14,14 @@ A feature-rich Windows desktop time display application supporting NTP network t
 - **Touch Support**: Supports touch operations, suitable for touchscreen devices
 - **DPI Aware**: Supports high-DPI displays (Per-Monitor V2), ensuring clear rendering at various resolutions
 - **Dynamic Font Sizing**: Automatically adjusts font size based on window dimensions; fonts follow window size in real-time during resize
-- **Smooth Resize**: DWM off-screen compositing eliminates button flickering during window resize
+- **D2D Accelerated Rendering**: Uses Direct2D/DirectWrite GPU hardware acceleration for better performance than traditional GDI
+- **Graceful Degradation**: Automatically falls back to D2D software rendering or GDI when GPU is unavailable; compatible with Windows 7~11
+- **Runtime DLL Loading**: Loads d2d1.dll/dwrite.dll via LoadLibrary at runtime, avoiding import library version mismatches with system DLLs
 - **Command Line Options**: Rich set of startup parameters
 
 ## System Requirements
 
-- Windows 7 or later
+- Windows 7 or later (Direct2D requires KB971644 Platform Update)
 - Visual Studio 2019 / 2022 / 2026 (recommended, using v142/v143/v145 toolset)
 - Windows SDK 10.0+
 
@@ -81,6 +83,7 @@ TimeDisplay.exe --font-path "myfont.ttf" --font-name "MyFont"  # Load external f
 
 ```
 ├── main.cpp                 # Main program logic — window creation, time display, event handling
+├── d2d_renderer.cpp/h       # Direct2D/DirectWrite renderer (hardware accelerated + software fallback)
 ├── fullscreen.cpp/h         # Full-screen mode management
 ├── help.cpp/h               # Help info and version info display module
 ├── ntp_client.cpp/h         # NTP client implementation for network time synchronization
@@ -96,9 +99,24 @@ TimeDisplay.exe --font-path "myfont.ttf" --font-name "MyFont"  # Load external f
 
 - Win32 API
 - C++17 (multithreading, atomic operations)
+- Direct2D / DirectWrite (GPU hardware accelerated rendering + software fallback)
 - NTP Protocol (RFC 4330)
 - Windows Socket (winsock2)
-- DWM (off-screen compositing, window rounding, acrylic effect)
+- DWM (window rounding)
+
+## Compatibility Notes
+
+The D2D renderer loads `d2d1.dll` / `dwrite.dll` via runtime dynamic loading (`LoadLibrary` + `GetProcAddress`) instead of compile-time static linking. This means:
+
+| Scenario | Behavior |
+|----------|----------|
+| Windows 10/11 (with GPU) | D2D hardware accelerated rendering |
+| Windows 10/11 (no GPU / Remote Desktop) | Auto fallback to D2D software rendering (WARP) or GDI |
+| Windows 7 + KB971644 | D2D hardware accelerated rendering |
+| Windows 7 without Platform Update | D2D unavailable → automatic GDI fallback |
+| Any platform GPU driver crash | `D2DERR_RECREATE_TARGET` auto-rebuilds resources |
+
+When D2D falls back to GDI, all features continue to work normally — only the rendering path switches from GPU acceleration to CPU software rendering.
 
 ## License
 
