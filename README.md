@@ -19,7 +19,6 @@
 - **动态字体**：根据窗口大小自动调整字体大小，拖动窗口时字体实时跟随变化
 - **D2D 加速渲染**：使用 Direct2D/DirectWrite GPU 硬件加速渲染，性能优于传统 GDI
 - **自动降级**：GPU 不可用时自动回退到 D2D 软件渲染或 GDI 软渲染，兼容 Windows 7~11
-- **DLL 动态加载**：d2d1.dll/dwrite.dll 运行时动态加载，避免导入库版本与系统 DLL 不匹配
 - **命令行选项**：支持丰富的命令行启动参数
 
 ## 系统要求
@@ -109,7 +108,7 @@ TimeDisplay.exe --font-path "myfont.ttf" --font-name "MyFont"  # 加载外部字
 
 ## 兼容性说明
 
-D2D 渲染器采用 **运行时动态加载**（`LoadLibrary` + `GetProcAddress`）方式加载 `d2d1.dll` / `dwrite.dll`，而非编译期静态链接。这意味着：
+渲染器采用 **硬件加速 + 自动降级** 策略：
 
 | 场景 | 表现 |
 |------|------|

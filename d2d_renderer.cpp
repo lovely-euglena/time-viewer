@@ -7,23 +7,12 @@
 #include <d2d1.h>
 #include <dwrite.h>
 
-// ===== D2D / DWrite 动态加载（避免导入库版本与系统 DLL 不兼容） =====
-// 函数指针类型定义
-typedef HRESULT (WINAPI *D2D1CreateFactoryFunc)(
-    D2D1_FACTORY_TYPE factoryType,
-    REFIID riid,
-    _Out_ void **factory);
-
-typedef HRESULT (WINAPI *DWriteCreateFactoryFunc)(
-    DWRITE_FACTORY_TYPE factoryType,
-    REFIID iid,
-    _Out_ IUnknown **factory);
+// d2d1.dll / dwrite.dll 使用静态链接（__stdcall 调用约定与 GetProcAddress 兼容性更好）
+// 新版 SDK 的 d2d1.dll 要求窗口可见时创建 HWND RenderTarget，已通过 GetDpi→GDI DPI 规避
+#pragma comment(lib, "d2d1.lib")
+#pragma comment(lib, "dwrite.lib")
 
 namespace {
-    HMODULE               g_hD2D1Dll     = nullptr;
-    HMODULE               g_hDWriteDll   = nullptr;
-    D2D1CreateFactoryFunc  g_pD2D1CF     = nullptr;
-    DWriteCreateFactoryFunc g_pDWriteCF  = nullptr;
 
     // ===== D2D 资源（全局，单窗口单例） =====
     // 渲染管线资源
@@ -44,7 +33,7 @@ namespace {
     IDWriteTextFormat*     g_fmtSource     = nullptr;
 
     bool g_initialized = false;
-    bool g_softwareMode = false;       // 是否为软件渲染模式
+    bool g_softwareMode = false;
 
     // 格式缓存验证参数（上一次创建时的值）
     int    g_cacheTimeSize   = 0;
@@ -115,51 +104,21 @@ void D2DRenderer_ForceSoftwareRendering(bool enable) {
     g_softwareMode = enable;
 }
 
-static bool LoadD2DDlls() {
-    if (g_hD2D1Dll && g_hDWriteDll) return true;  // 已加载
-
-    if (!g_hD2D1Dll) {
-        g_hD2D1Dll = LoadLibraryW(L"d2d1.dll");
-        if (!g_hD2D1Dll) return false;
-        g_pD2D1CF = (D2D1CreateFactoryFunc)GetProcAddress(g_hD2D1Dll, "D2D1CreateFactory");
-        if (!g_pD2D1CF) { FreeLibrary(g_hD2D1Dll); g_hD2D1Dll = nullptr; return false; }
-    }
-
-    if (!g_hDWriteDll) {
-        g_hDWriteDll = LoadLibraryW(L"dwrite.dll");
-        if (!g_hDWriteDll) { /* d2d1 已加载成功，dwrite 失败可接受 */ return true; }
-        g_pDWriteCF = (DWriteCreateFactoryFunc)GetProcAddress(g_hDWriteDll, "DWriteCreateFactory");
-        if (!g_pDWriteCF) { FreeLibrary(g_hDWriteDll); g_hDWriteDll = nullptr; }
-    }
-
-    return true;
-}
-
 bool D2DRenderer_Init(HWND hWnd) {
     if (g_initialized) return true;
     if (!hWnd || !IsWindow(hWnd)) return false;
 
-    // 动态加载 d2d1.dll / dwrite.dll
-    if (!LoadD2DDlls()) return false;
-
-    HRESULT hr = E_FAIL;
-    if (g_pD2D1CF) {
-        hr = g_pD2D1CF(
-            D2D1_FACTORY_TYPE_SINGLE_THREADED,
-            __uuidof(ID2D1Factory),
-            (void**)&g_d2dFactory);
-    }
+    HRESULT hr = D2D1CreateFactory(
+        D2D1_FACTORY_TYPE_SINGLE_THREADED,
+        __uuidof(ID2D1Factory),
+        (void**)&g_d2dFactory);
     if (FAILED(hr) || !g_d2dFactory) return false;
 
     IUnknown* dwriteTemp = nullptr;
-    if (g_pDWriteCF) {
-        hr = g_pDWriteCF(
-            DWRITE_FACTORY_TYPE_SHARED,
-            __uuidof(IDWriteFactory),
-            &dwriteTemp);
-    } else {
-        hr = E_FAIL;
-    }
+    hr = DWriteCreateFactory(
+        DWRITE_FACTORY_TYPE_SHARED,
+        __uuidof(IDWriteFactory),
+        &dwriteTemp);
     if (FAILED(hr) || !dwriteTemp) {
         SafeRelease(g_d2dFactory);
         return false;
@@ -242,12 +201,6 @@ void D2DRenderer_Cleanup() {
     SafeRelease(g_dwriteFactory);
     SafeRelease(g_d2dFactory);
     g_initialized = false;
-
-    // 卸载动态加载的 DLL（工厂对象已释放，可以安全卸载）
-    if (g_hDWriteDll) { FreeLibrary(g_hDWriteDll); g_hDWriteDll = nullptr; }
-    if (g_hD2D1Dll)  { FreeLibrary(g_hD2D1Dll);  g_hD2D1Dll  = nullptr; }
-    g_pD2D1CF = nullptr;
-    g_pDWriteCF = nullptr;
 }
 
 void D2DRenderer_OnResize(HWND hWnd, int width, int height) {

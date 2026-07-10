@@ -16,7 +16,6 @@ A feature-rich Windows desktop time display application supporting NTP network t
 - **Dynamic Font Sizing**: Automatically adjusts font size based on window dimensions; fonts follow window size in real-time during resize
 - **D2D Accelerated Rendering**: Uses Direct2D/DirectWrite GPU hardware acceleration for better performance than traditional GDI
 - **Graceful Degradation**: Automatically falls back to D2D software rendering or GDI when GPU is unavailable; compatible with Windows 7~11
-- **Runtime DLL Loading**: Loads d2d1.dll/dwrite.dll via LoadLibrary at runtime, avoiding import library version mismatches with system DLLs
 - **Command Line Options**: Rich set of startup parameters
 
 ## System Requirements
@@ -106,7 +105,7 @@ TimeDisplay.exe --font-path "myfont.ttf" --font-name "MyFont"  # Load external f
 
 ## Compatibility Notes
 
-The D2D renderer loads `d2d1.dll` / `dwrite.dll` via runtime dynamic loading (`LoadLibrary` + `GetProcAddress`) instead of compile-time static linking. This means:
+The renderer uses a **hardware accelerated + automatic fallback** strategy:
 
 | Scenario | Behavior |
 |----------|----------|

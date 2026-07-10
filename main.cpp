@@ -120,7 +120,7 @@ bool g_startTopmost = false;
 bool g_topmost = false;
 bool g_givehelp = false;
 bool g_showVersion = false;    // 新增：显示版本信息
-
+bool g_forceGDI = false;       // --force-gdi / --disable-gpu：强制使用GDI而非GPU加速
 // ===== 命令行字体参数 =====
 std::wstring g_cmdFontName;           // --font-name 参数指定的字体族名称
 std::wstring g_cmdFontPath;           // --font-path 参数指定的字体文件路径
@@ -209,6 +209,10 @@ static void ShowHelpAndExit() {
         L"  -t, --transparency    设置窗口透明度 (0-255, 0=完全透明, 255=不透明)\n"
         L"  -h, --help            显示此帮助信息\n"
         L"  -v, --version         显示版本信息\n"
+        L"  --force-gdi           强制使用 GDI 软件渲染，不启用 Direct2D GPU 加速
+"
+        L"  --disable-gpu         同上，强制禁用 GPU 加速（与 --force-gdi 等效）
+"
         L"  --font-name <名称>    指定显示字体（系统中已安装的字体族名称）\n"
         L"                        示例: --font-name \"Microsoft YaHei\"\n"
         L"  --font-path <路径>    从外部字体文件加载字体（支持 .ttf/.otf）\n"
@@ -737,6 +741,9 @@ int WINAPI wWinMain(_In_ HINSTANCE hInstance,
                     return 1;
                 }
             }
+            else if (wcscmp(argv[i], L"--force-gdi") == 0 || wcscmp(argv[i], L"--disable-gpu") == 0) {
+                g_forceGDI = true;
+            }
             else {
                 // 无法识别的参数 → 报错并退出
                 wchar_t errMsg[256];
@@ -913,7 +920,10 @@ int WINAPI wWinMain(_In_ HINSTANCE hInstance,
     InitializeFullscreenModule(hMainWindow);
 
     // 在窗口可见前初始化 D2D（避免首帧走 GDI 导致按钮闪烁）
-    if (!D2DRenderer_Init(hMainWindow)) {
+    // 如果指定了 --force-gdi / --disable-gpu，则跳过 D2D 初始化，强制使用 GDI 渲染
+    if (g_forceGDI) {
+        OutputDebugStringW(L"命令行指定 --force-gdi，跳过 D2D 初始化，强制使用 GDI 渲染\n");
+    } else if (!D2DRenderer_Init(hMainWindow)) {
         OutputDebugStringW(L"Direct2D GPU 渲染器初始化失败，将使用 GDI 软渲染回退\n");
     }
 
