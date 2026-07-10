@@ -123,6 +123,9 @@ bool g_topmost = false;
 bool g_givehelp = false;
 bool g_showVersion = false;    // 新增：显示版本信息
 bool g_forceGDI = false;       // --force-gdi / --disable-gpu：强制使用GDI而非GPU加速
+bool g_showWarning = false;    // --show-warning：强制显示参数警告弹窗
+bool g_ignoreWarning = false;  // --ignore-warning / -w：忽略快捷方式启动参数警告
+bool g_isGuiLaunch = false;    // 是否为 GUI 环境启动（无父控制台，快捷方式/双击）
 // ===== 命令行字体参数 =====
 std::wstring g_cmdFontName;           // --font-name 参数指定的字体族名称
 std::wstring g_cmdFontPath;           // --font-path 参数指定的字体文件路径
@@ -211,6 +214,8 @@ static void ShowHelpAndExit() {
         L"  -t, --transparency    设置窗口透明度 (0-255, 0=完全透明, 255=不透明)\n"
         L"  -h, --help            显示此帮助信息\n"
         L"  -v, --version         显示版本信息\n"
+        L"  --show-warning        强制显示参数检查警告弹窗（命令行启动时也显示）\n"
+        L"  -w, --ignore-warning  忽略快捷方式/双击启动时的参数警告弹窗\n"
         L"  --force-gdi           强制使用 GDI 软件渲染，不启用 Direct2D GPU 加速\n"
         L"  --disable-gpu         同上，强制禁用 GPU 加速（与 --force-gdi 等效）\n"
         L"  --font-name <名称>    指定显示字体（系统中已安装的字体族名称）\n"
@@ -740,6 +745,9 @@ static bool IsFontFileReadable(const wchar_t* fontPath) {
     return true;
 }
 
+// 前向声明：ReportError 用于在 GUI 启动时将参数错误同时弹窗显示
+static void ReportError(const wchar_t* msg);
+
 // 从字体文件路径中提取文件名（不含扩展名）作为字体族名称的猜测值
 static std::wstring GuessFontNameFromPath(const std::wstring& fontPath) {
     size_t sep = fontPath.find_last_of(L"\\/");
@@ -754,7 +762,7 @@ static bool LoadFontFromPath(const std::wstring& fontPath) {
     if (added == 0) {
         wchar_t errMsg[512];
         wsprintfW(errMsg, L"错误: 无法加载字体文件 '%s'，文件可能不是有效的字体格式或已被损坏\n", fontPath.c_str());
-        PrintToConsole(errMsg);
+        ReportError(errMsg);
         return false;
     }
     g_fontLoadedFromPath = true;
@@ -779,10 +787,31 @@ static bool LoadEmbeddedFont() {
     return true;
 }
 
+// 报告参数错误：始终输出到控制台（cmd/powershell 可见），
+// 同时在 GUI 启动环境（快捷方式/双击，用户看不到控制台）下弹窗显示。
+// 命令行下可用 --show-warning 强制弹窗，--ignore-warning/-w 抑制弹窗。
+static void ReportError(const wchar_t* msg) {
+    PrintToConsole(msg);
+    if (g_showWarning || (g_isGuiLaunch && !g_ignoreWarning)) {
+        MessageBoxW(nullptr, msg, L"TimeDisplay - 参数错误", MB_OK | MB_ICONERROR);
+    }
+}
+
 int WINAPI wWinMain(_In_ HINSTANCE hInstance,
     _In_opt_ HINSTANCE hPrevInstance,
     _In_ LPWSTR lpCmdLine,
     _In_ int nCmdShow) {
+
+    // 检测是否有父控制台，判断是否为 GUI 环境启动（快捷方式/双击）
+    // 命令行（cmd/powershell）启动时存在父控制台，GUI 双击/快捷方式启动则无
+    if (AttachConsole(ATTACH_PARENT_PROCESS)) {
+        // 有父控制台，来自命令行
+        FreeConsole();
+        g_isGuiLaunch = false;
+    } else if (GetLastError() == ERROR_INVALID_HANDLE) {
+        // 无父控制台，可能来自快捷方式或直接双击
+        g_isGuiLaunch = true;
+    }
 
     int argc;
     LPWSTR* argv = CommandLineToArgvW(GetCommandLineW(), &argc);
@@ -809,8 +838,8 @@ int WINAPI wWinMain(_In_ HINSTANCE hInstance,
             else if (wcscmp(argv[i], L"--transparency") == 0 || wcscmp(argv[i], L"-t") == 0) {
                 // --transparency/-t 需要后面跟数值参数
                 if (i + 1 >= argc) {
-                    PrintToConsole(L"错误: 选项 --transparency/-t 需要一个数值参数 (0-255)\n");
-                    PrintToConsole(L"用法示例: TimeDisplay.exe --transparency 200\n");
+                    ReportError(L"错误: 选项 --transparency/-t 需要一个数值参数 (0-255)\n"
+                                L"用法示例: TimeDisplay.exe --transparency 200\n");
                     LocalFree(argv);
                     return 1;
                 }
@@ -818,7 +847,7 @@ int WINAPI wWinMain(_In_ HINSTANCE hInstance,
                 if (!IsNumericString(valStr)) {
                     wchar_t errMsg[256];
                     wsprintfW(errMsg, L"错误: --transparency/-t 的参数 '%s' 不是有效的数字\n", valStr);
-                    PrintToConsole(errMsg);
+                    ReportError(errMsg);
                     LocalFree(argv);
                     return 1;
                 }
@@ -826,7 +855,7 @@ int WINAPI wWinMain(_In_ HINSTANCE hInstance,
                 if (val < 0 || val > 255) {
                     wchar_t errMsg[256];
                     wsprintfW(errMsg, L"错误: 透明度值 %d 超出有效范围，允许值为 0-255\n", val);
-                    PrintToConsole(errMsg);
+                    ReportError(errMsg);
                     LocalFree(argv);
                     return 1;
                 }
@@ -839,14 +868,14 @@ int WINAPI wWinMain(_In_ HINSTANCE hInstance,
             else if (wcscmp(argv[i], L"--font-name") == 0) {
                 // --font-name 需要后面跟字体名称参数
                 if (i + 1 >= argc) {
-                    PrintToConsole(L"错误: 选项 --font-name 需要一个字体族名称参数\n");
-                    PrintToConsole(L"用法示例: TimeDisplay.exe --font-name \"Arial\"\n");
+                    ReportError(L"错误: 选项 --font-name 需要一个字体族名称参数\n"
+                                L"用法示例: TimeDisplay.exe --font-name \"Arial\"\n");
                     LocalFree(argv);
                     return 1;
                 }
                 g_cmdFontName = argv[++i];
                 if (g_cmdFontName.empty()) {
-                    PrintToConsole(L"错误: --font-name 的字体名称不能为空\n");
+                    ReportError(L"错误: --font-name 的字体名称不能为空\n");
                     LocalFree(argv);
                     return 1;
                 }
@@ -854,27 +883,32 @@ int WINAPI wWinMain(_In_ HINSTANCE hInstance,
             else if (wcscmp(argv[i], L"--font-path") == 0) {
                 // --font-path 需要后面跟字体文件路径参数
                 if (i + 1 >= argc) {
-                    PrintToConsole(L"错误: 选项 --font-path 需要一个字体文件路径参数\n");
-                    PrintToConsole(L"用法示例: TimeDisplay.exe --font-path \"C:\\Windows\\Fonts\\myfont.ttf\"\n");
+                    ReportError(L"错误: 选项 --font-path 需要一个字体文件路径参数\n"
+                                L"用法示例: TimeDisplay.exe --font-path \"C:\\Windows\\Fonts\\myfont.ttf\"\n");
                     LocalFree(argv);
                     return 1;
                 }
                 g_cmdFontPath = argv[++i];
                 if (g_cmdFontPath.empty()) {
-                    PrintToConsole(L"错误: --font-path 的字体路径不能为空\n");
+                    ReportError(L"错误: --font-path 的字体路径不能为空\n");
                     LocalFree(argv);
                     return 1;
                 }
+            }
+            else if (wcscmp(argv[i], L"--show-warning") == 0) {
+                g_showWarning = true;
+            }
+            else if (wcscmp(argv[i], L"--ignore-warning") == 0 || wcscmp(argv[i], L"-w") == 0) {
+                g_ignoreWarning = true;
             }
             else if (wcscmp(argv[i], L"--force-gdi") == 0 || wcscmp(argv[i], L"--disable-gpu") == 0) {
                 g_forceGDI = true;
             }
             else {
                 // 无法识别的参数 → 报错并退出
-                wchar_t errMsg[256];
-                wsprintfW(errMsg, L"错误: 无法识别的选项 '%s'\n", argv[i]);
-                PrintToConsole(errMsg);
-                PrintToConsole(L"使用 --help/-h 查看所有可用选项\n");
+                wchar_t errMsg[384];
+                wsprintfW(errMsg, L"错误: 无法识别的选项 '%s'\n使用 --help/-h 查看所有可用选项\n", argv[i]);
+                ReportError(errMsg);
                 LocalFree(argv);
                 return 1;
             }
@@ -895,8 +929,8 @@ int WINAPI wWinMain(_In_ HINSTANCE hInstance,
     if (!g_cmdFontName.empty() && g_cmdFontPath.empty()) {
         if (!IsFontNameValid(g_cmdFontName.c_str())) {
             std::wstring errMsg = L"错误: 系统中未找到字体 '" + g_cmdFontName + L"'，请检查字体名称是否正确\n";
-            PrintToConsole(errMsg.c_str());
-            PrintToConsole(L"提示: 使用 --font-path 可以指定外部字体文件路径\n");
+            errMsg += L"提示: 使用 --font-path 可以指定外部字体文件路径\n";
+            ReportError(errMsg.c_str());
             return 1;
         }
     }
@@ -905,7 +939,7 @@ int WINAPI wWinMain(_In_ HINSTANCE hInstance,
     if (!g_cmdFontPath.empty()) {
         if (!IsFontFileReadable(g_cmdFontPath.c_str())) {
             std::wstring errMsg = L"错误: 字体文件不存在或无法访问 '" + g_cmdFontPath + L"'\n";
-            PrintToConsole(errMsg.c_str());
+            ReportError(errMsg.c_str());
             return 1;
         }
     }

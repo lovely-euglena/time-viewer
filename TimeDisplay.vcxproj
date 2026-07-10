@@ -106,40 +106,40 @@
   </ImportGroup>
   <PropertyGroup Label="UserMacros" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
-    <OutDir>$(SolutionDir)$(Configuration)\$(PlatformShortcut)\</OutDir>
-    <IntDir>$(Configuration)\$(PlatformShortcut)\</IntDir>
+    <OutDir>$(SolutionDir)$(Configuration)\x86\</OutDir>
+    <IntDir>$(Configuration)\x86\</IntDir>
     <LinkIncremental>true</LinkIncremental>
     <TargetName>$(ProjectName)-$(Configuration)-$(PlatformTarget)-</TargetName>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
-    <OutDir>$(SolutionDir)$(Configuration)\$(PlatformShortcut)\</OutDir>
-    <IntDir>$(Configuration)\$(PlatformShortcut)\</IntDir>
+    <OutDir>$(SolutionDir)$(Configuration)\x86\</OutDir>
+    <IntDir>$(Configuration)\x86\</IntDir>
     <LinkIncremental>false</LinkIncremental>
     <LinkKeyFile>$(ProjectDir)certificate.pfx</LinkKeyFile>
     <TargetName>$(ProjectName)-$(Configuration)-$(PlatformTarget)-</TargetName>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release-Full|Win32'">
-    <OutDir>$(SolutionDir)$(Configuration)\$(PlatformShortcut)\</OutDir>
-    <IntDir>$(Configuration)\$(PlatformShortcut)\</IntDir>
+    <OutDir>$(SolutionDir)$(Configuration)\x86\</OutDir>
+    <IntDir>$(Configuration)\x86\</IntDir>
     <LinkIncremental>false</LinkIncremental>
     <LinkKeyFile>$(ProjectDir)certificate.pfx</LinkKeyFile>
     <TargetName>$(ProjectName)-$(Configuration)-$(PlatformTarget)-</TargetName>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
-    <OutDir>$(SolutionDir)$(Configuration)\$(PlatformShortcut)\</OutDir>
-    <IntDir>$(Configuration)\$(PlatformShortcut)\</IntDir>
+    <OutDir>$(SolutionDir)$(Configuration)\x64\</OutDir>
+    <IntDir>$(Configuration)\x64\</IntDir>
     <LinkIncremental>true</LinkIncremental>
     <TargetName>$(ProjectName)-$(Configuration)-$(PlatformTarget)-</TargetName>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
-    <OutDir>$(SolutionDir)$(Configuration)\$(PlatformShortcut)\</OutDir>
-    <IntDir>$(Configuration)\$(PlatformShortcut)\</IntDir>
+    <OutDir>$(SolutionDir)$(Configuration)\x64\</OutDir>
+    <IntDir>$(Configuration)\x64\</IntDir>
     <LinkIncremental>false</LinkIncremental>
     <TargetName>$(ProjectName)-$(Configuration)-$(PlatformTarget)-</TargetName>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release-Full|x64'">
-    <OutDir>$(SolutionDir)$(Configuration)\$(PlatformShortcut)\</OutDir>
-    <IntDir>$(Configuration)\$(PlatformShortcut)\</IntDir>
+    <OutDir>$(SolutionDir)$(Configuration)\x64\</OutDir>
+    <IntDir>$(Configuration)\x64\</IntDir>
     <LinkIncremental>false</LinkIncremental>
     <TargetName>$(ProjectName)-$(Configuration)-$(PlatformTarget)-</TargetName>
   </PropertyGroup>
