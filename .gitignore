@@ -363,3 +363,6 @@ MigrationBackup/
 FodyWeavers.xsd
 /cert.pem
 /cert.key
+
+# Build output copy
+/output/
