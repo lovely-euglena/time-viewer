@@ -1080,7 +1080,9 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) 
         }
         else {
             HDC memDC = CreateCompatibleDC(hdc);
+            if (!memDC) { EndPaint(hWnd, &ps); break; }
             HBITMAP memBitmap = CreateCompatibleBitmap(hdc, width, height);
+            if (!memBitmap) { DeleteDC(memDC); EndPaint(hWnd, &ps); break; }
             HBITMAP oldBitmap = (HBITMAP)SelectObject(memDC, memBitmap);
 
             HBRUSH hBrush = CreateSolidBrush(RGB(10, 10, 20));
