@@ -193,7 +193,7 @@ static void ShowVersionAndExit() {
     exit(0);
 }
 
-// 分页输出帮助信息（每页 LINES_PER_PAGE 行，按任意键继续）
+// 分页输出帮助信息（每页 pageLines 行，支持鼠标滚轮和键盘）
 static void ShowHelpAndExit() {
     const wchar_t* helpMsg =
         L"\n\n\n===========================================================\n"
@@ -248,7 +248,7 @@ static void ShowHelpAndExit() {
         L"===========================================================\n"
         L"\n\n\n";
 
-    // 获取控制台句柄
+    // 获取控制台输出句柄
     HANDLE hCon = GetStdHandle(STD_OUTPUT_HANDLE);
     if (hCon == INVALID_HANDLE_VALUE || hCon == nullptr) {
         if (!AttachConsole(ATTACH_PARENT_PROCESS)) {
@@ -257,7 +257,7 @@ static void ShowHelpAndExit() {
         hCon = GetStdHandle(STD_OUTPUT_HANDLE);
     }
 
-    // 无法获取控制台句柄时直接退回到 OutputDebugString
+    // 无法获取控制台句柄时退回到 OutputDebugString
     if (!hCon || hCon == INVALID_HANDLE_VALUE) {
         OutputDebugStringW(helpMsg);
         exit(0);
@@ -265,40 +265,112 @@ static void ShowHelpAndExit() {
 
     // 获取控制台窗口尺寸，计算每页行数
     CONSOLE_SCREEN_BUFFER_INFO csbi;
-    int pageLines = 25; // 默认值
+    int pageLines = 25;
     if (GetConsoleScreenBufferInfo(hCon, &csbi)) {
         int windowHeight = csbi.srWindow.Bottom - csbi.srWindow.Top + 1;
-        pageLines = max(10, windowHeight - 1); // 保留一行的余量
+        pageLines = max(10, windowHeight - 1);
     }
 
-    // 逐行输出，每页暂停
+    // 准备标准输入句柄，用于 ReadConsoleInput（同时捕获键盘和鼠标）
+    HANDLE hStdin = GetStdHandle(STD_INPUT_HANDLE);
+    bool haveStdin = (hStdin != INVALID_HANDLE_VALUE && hStdin != nullptr);
+    DWORD prevInputMode = 0;
+    if (haveStdin) {
+        GetConsoleMode(hStdin, &prevInputMode);
+        // 启用鼠标输入，并禁用快速编辑模式防止鼠标被控制台截获
+        SetConsoleMode(hStdin, ENABLE_MOUSE_INPUT | ENABLE_EXTENDED_FLAGS);
+    }
+
+    // ======== 等待用户输入的辅助函数 ========
+    // 返回值：>0 = 要继续打印的行数，0 = 退出，-1 = 出错(按默认一页)
+    auto WaitForInput = [&]() -> int {
+        if (!haveStdin) {
+            _getwch();
+            return pageLines;
+        }
+
+        INPUT_RECORD ir;
+        DWORD readCount = 0;
+
+        // 循环读取输入事件，忽略不相关的事件（如鼠标移动）
+        while (true) {
+            if (!ReadConsoleInput(hStdin, &ir, 1, &readCount) || readCount == 0) {
+                return pageLines; // 出错时按默认一页继续
+            }
+
+            switch (ir.EventType) {
+            case KEY_EVENT:
+                if (ir.Event.KeyEvent.bKeyDown) {
+                    wchar_t ch = ir.Event.KeyEvent.uChar.UnicodeChar;
+                    if (ch == L'Q' || ch == L'q' || ch == 27) {
+                        return 0; // 退出
+                    }
+                    return pageLines; // 任意键 → 一页
+                }
+                break;
+
+            case MOUSE_EVENT: {
+                auto& mouse = ir.Event.MouseEvent;
+
+                if (mouse.dwEventFlags & MOUSE_WHEELED) {
+                    // 鼠标滚轮：HIWORD(dwButtonState) 包含滚动增量
+                    //  delta > 0 → 滚轮向前/远离用户 → 后退 → 前进行数少
+                    //  delta < 0 → 滚轮向后/拉向用户 → 前进 → 前进行数多
+                    short delta = HIWORD(mouse.dwButtonState);
+                    return (delta > 0) ? 1 : 4; // 向前滚1行，向后滚4行
+                }
+
+                if (mouse.dwEventFlags == 0) {
+                    // 按钮点击（非移动、非滚轮）
+                    if (mouse.dwButtonState & (FROM_LEFT_1ST_BUTTON_PRESSED | RIGHTMOST_BUTTON_PRESSED)) {
+                        return pageLines; // 左键/右键点击 → 一页
+                    }
+                }
+                break;
+            }
+            }
+            // 其他事件（鼠标移动等）忽略，继续等待
+        }
+    };
+
+    // ======== 主输出循环 ========
     std::wstringstream stream(helpMsg);
     std::wstring line;
     int lineCount = 0;
+    int nextPauseLine = pageLines; // 到第几行时暂停
     DWORD written;
 
     while (std::getline(stream, line)) {
-        // getline 会剥离分隔符，重新补上
         line += L"\n";
         WriteConsoleW(hCon, line.c_str(), (DWORD)line.length(), &written, nullptr);
-
         lineCount++;
-        if (lineCount % pageLines == 0 && !stream.eof()) {
-            static const wchar_t prompt[] = L"--- 按任意键继续，按 Q 退出 ---";
-            WriteConsoleW(hCon, prompt, (DWORD)(sizeof(prompt) / sizeof(wchar_t) - 1), &written, nullptr);
 
-            int ch = _getwch();
-            // 按 Q 或 q 或 Esc 提前退出
-            if (ch == L'Q' || ch == L'q' || ch == 27) {
-                break;
-            }
+        if (lineCount >= nextPauseLine && !stream.eof()) {
+            // 显示提示
+            static const wchar_t prompt[] =
+                L"--- 滚轮浏览，按任意键翻页，按 Q 退出 ---";
+            WriteConsoleW(hCon, prompt,
+                (DWORD)(sizeof(prompt) / sizeof(wchar_t) - 1), &written, nullptr);
 
-            // 清除提示行 (\r 回到行首 + 空格覆盖 + \r)
+            int advance = WaitForInput(); // 等待用户操作
+
+            // 清除提示行
             WriteConsoleW(hCon, L"\r", 1, &written, nullptr);
             static const wchar_t spaces[] = L"                                      ";
-            WriteConsoleW(hCon, spaces, (DWORD)(sizeof(spaces) / sizeof(wchar_t) - 1), &written, nullptr);
+            WriteConsoleW(hCon, spaces,
+                (DWORD)(sizeof(spaces) / sizeof(wchar_t) - 1), &written, nullptr);
             WriteConsoleW(hCon, L"\r", 1, &written, nullptr);
+
+            if (advance <= 0) break; // 用户退出
+
+            // 下次暂停位置 = 当前行 + 用户指定的前进行数
+            nextPauseLine = lineCount + advance;
         }
+    }
+
+    // 恢复输入模式
+    if (haveStdin) {
+        SetConsoleMode(hStdin, prevInputMode);
     }
 
     exit(0);
