@@ -18,6 +18,8 @@
 #include <atomic>
 #include <cstdio>
 #include <cstdlib>
+#include <sstream>
+#include <conio.h>
 #include "d2d_renderer.h"
 #include "fullscreen.h"
 #include "ntp_client.h"
@@ -191,7 +193,7 @@ static void ShowVersionAndExit() {
     exit(0);
 }
 
-// 显示完整帮助信息并退出
+// 分页输出帮助信息（每页 LINES_PER_PAGE 行，按任意键继续）
 static void ShowHelpAndExit() {
     const wchar_t* helpMsg =
         L"\n\n\n===========================================================\n"
@@ -245,7 +247,60 @@ static void ShowHelpAndExit() {
         L"  问题反馈：请在Gitee上提交Issue\n"
         L"===========================================================\n"
         L"\n\n\n";
-    PrintToConsole(helpMsg);
+
+    // 获取控制台句柄
+    HANDLE hCon = GetStdHandle(STD_OUTPUT_HANDLE);
+    if (hCon == INVALID_HANDLE_VALUE || hCon == nullptr) {
+        if (!AttachConsole(ATTACH_PARENT_PROCESS)) {
+            AllocConsole();
+        }
+        hCon = GetStdHandle(STD_OUTPUT_HANDLE);
+    }
+
+    // 无法获取控制台句柄时直接退回到 OutputDebugString
+    if (!hCon || hCon == INVALID_HANDLE_VALUE) {
+        OutputDebugStringW(helpMsg);
+        exit(0);
+    }
+
+    // 获取控制台窗口尺寸，计算每页行数
+    CONSOLE_SCREEN_BUFFER_INFO csbi;
+    int pageLines = 25; // 默认值
+    if (GetConsoleScreenBufferInfo(hCon, &csbi)) {
+        int windowHeight = csbi.srWindow.Bottom - csbi.srWindow.Top + 1;
+        pageLines = max(10, windowHeight - 1); // 保留一行的余量
+    }
+
+    // 逐行输出，每页暂停
+    std::wstringstream stream(helpMsg);
+    std::wstring line;
+    int lineCount = 0;
+    DWORD written;
+
+    while (std::getline(stream, line)) {
+        // getline 会剥离分隔符，重新补上
+        line += L"\n";
+        WriteConsoleW(hCon, line.c_str(), (DWORD)line.length(), &written, nullptr);
+
+        lineCount++;
+        if (lineCount % pageLines == 0 && !stream.eof()) {
+            static const wchar_t prompt[] = L"--- 按任意键继续，按 Q 退出 ---";
+            WriteConsoleW(hCon, prompt, (DWORD)(sizeof(prompt) / sizeof(wchar_t) - 1), &written, nullptr);
+
+            int ch = _getwch();
+            // 按 Q 或 q 或 Esc 提前退出
+            if (ch == L'Q' || ch == L'q' || ch == 27) {
+                break;
+            }
+
+            // 清除提示行 (\r 回到行首 + 空格覆盖 + \r)
+            WriteConsoleW(hCon, L"\r", 1, &written, nullptr);
+            static const wchar_t spaces[] = L"                                      ";
+            WriteConsoleW(hCon, spaces, (DWORD)(sizeof(spaces) / sizeof(wchar_t) - 1), &written, nullptr);
+            WriteConsoleW(hCon, L"\r", 1, &written, nullptr);
+        }
+    }
+
     exit(0);
 }
 
