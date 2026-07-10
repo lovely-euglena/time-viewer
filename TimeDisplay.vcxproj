@@ -109,33 +109,39 @@
     <OutDir>$(SolutionDir)$(Configuration)\</OutDir>
     <IntDir>$(Configuration)\</IntDir>
     <LinkIncremental>true</LinkIncremental>
+    <TargetName>TimeDisplay</TargetName>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
     <OutDir>$(SolutionDir)$(Configuration)\</OutDir>
     <IntDir>$(Configuration)\</IntDir>
     <LinkIncremental>false</LinkIncremental>
-    <LinkKeyFile>E:\code\TimeViwer\certificate.pfx</LinkKeyFile>
+    <LinkKeyFile>$(ProjectDir)certificate.pfx</LinkKeyFile>
+    <TargetName>TimeDisplay</TargetName>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release-Full|Win32'">
     <OutDir>$(SolutionDir)$(Configuration)\</OutDir>
     <IntDir>$(Configuration)\</IntDir>
     <LinkIncremental>false</LinkIncremental>
-    <LinkKeyFile>E:\code\TimeViwer\certificate.pfx</LinkKeyFile>
+    <LinkKeyFile>$(ProjectDir)certificate.pfx</LinkKeyFile>
+    <TargetName>TimeDisplay</TargetName>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <OutDir>$(SolutionDir)$(Configuration)\</OutDir>
     <IntDir>$(Configuration)\</IntDir>
     <LinkIncremental>true</LinkIncremental>
+    <TargetName>TimeDisplay</TargetName>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <OutDir>$(SolutionDir)$(Configuration)\</OutDir>
     <IntDir>$(Configuration)\</IntDir>
     <LinkIncremental>false</LinkIncremental>
+    <TargetName>TimeDisplay</TargetName>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release-Full|x64'">
     <OutDir>$(SolutionDir)$(Configuration)\</OutDir>
     <IntDir>$(Configuration)\</IntDir>
     <LinkIncremental>false</LinkIncremental>
+    <TargetName>TimeDisplay</TargetName>
   </PropertyGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
     <ClCompile>
@@ -152,7 +158,6 @@
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <AdditionalDependencies>dwmapi.lib;ws2_32.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <EntryPointSymbol>wWinMainCRTStartup</EntryPointSymbol>
-      <TargetName>TimeDisplay</TargetName>
       <OutputFile>$(OutDir)TimeDisplay.exe</OutputFile>
       <AdditionalManifestFiles>app.manifest</AdditionalManifestFiles>
     </Link>
@@ -186,7 +191,6 @@
       <GenerateDebugInformation>false</GenerateDebugInformation>
       <AdditionalDependencies>dwmapi.lib;ws2_32.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <EntryPointSymbol>wWinMainCRTStartup</EntryPointSymbol>
-      <TargetName>TimeDisplay</TargetName>
       <OutputFile>$(OutDir)TimeDisplay.exe</OutputFile>
       <LinkTimeCodeGeneration>UseLinkTimeCodeGeneration</LinkTimeCodeGeneration>
       <GenerateWindowsMetadata>true</GenerateWindowsMetadata>
@@ -221,7 +225,6 @@
       <GenerateDebugInformation>false</GenerateDebugInformation>
       <AdditionalDependencies>dwmapi.lib;ws2_32.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <EntryPointSymbol>wWinMainCRTStartup</EntryPointSymbol>
-      <TargetName>TimeDisplay</TargetName>
       <OutputFile>$(OutDir)TimeDisplay.exe</OutputFile>
       <LinkTimeCodeGeneration>UseLinkTimeCodeGeneration</LinkTimeCodeGeneration>
       <GenerateWindowsMetadata>true</GenerateWindowsMetadata>
@@ -249,7 +252,6 @@
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <AdditionalDependencies>dwmapi.lib;ws2_32.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <EntryPointSymbol>wWinMainCRTStartup</EntryPointSymbol>
-      <TargetName>TimeDisplay</TargetName>
       <OutputFile>$(OutDir)TimeDisplay.exe</OutputFile>
     </Link>
     <PostBuildEvent>
@@ -282,7 +284,6 @@
       <GenerateDebugInformation>false</GenerateDebugInformation>
       <AdditionalDependencies>dwmapi.lib;ws2_32.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <EntryPointSymbol>wWinMainCRTStartup</EntryPointSymbol>
-      <TargetName>TimeDisplay</TargetName>
       <OutputFile>$(OutDir)TimeDisplay.exe</OutputFile>
       <GenerateWindowsMetadata>true</GenerateWindowsMetadata>
     </Link>
@@ -316,7 +317,6 @@
       <GenerateDebugInformation>false</GenerateDebugInformation>
       <AdditionalDependencies>dwmapi.lib;ws2_32.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <EntryPointSymbol>wWinMainCRTStartup</EntryPointSymbol>
-      <TargetName>TimeDisplay</TargetName>
       <OutputFile>$(OutDir)TimeDisplay.exe</OutputFile>
       <GenerateWindowsMetadata>true</GenerateWindowsMetadata>
     </Link>
