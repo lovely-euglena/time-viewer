@@ -854,20 +854,17 @@ int WINAPI wWinMain(_In_ HINSTANCE hInstance,
     int initWidth = (int)(BASE_INIT_WIDTH * dpi / 96.0f);
     int initHeight = (int)(BASE_INIT_HEIGHT * dpi / 96.0f);
 
-    // WS_EX_COMPOSITED：DWM 离屏缓冲，父窗口与子窗口在单次呈现中一次性合成，
-    // 避免拖拽时背景擦除与子窗口交替绘制导致的闪烁。
-    // 注意：WS_EX_COMPOSITED 与 WS_EX_LAYERED 不兼容，透明度模式降级为常规方式。
+    // 注意：不使用 WS_EX_COMPOSITED，因为它与 D2D HWND RenderTarget 不兼容
+    // （D2D 使用自己的 DXGI 交换链双缓冲，GDI 回退也做了内存 DC 双缓冲，两者都已足够）
     DWORD exStyle = WS_EX_APPWINDOW;
     if (g_transparency < 255) {
         exStyle |= WS_EX_LAYERED;
-    } else {
-        exStyle |= WS_EX_COMPOSITED;
     }
     hMainWindow = CreateWindowExW(
         exStyle,
         CLASS_NAME,
         L"时间显示器",
-        WS_OVERLAPPEDWINDOW,
+        WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN,
         CW_USEDEFAULT, CW_USEDEFAULT,
         initWidth, initHeight,
         nullptr, nullptr, hInstance, nullptr);
@@ -915,6 +912,7 @@ int WINAPI wWinMain(_In_ HINSTANCE hInstance,
     CreateDynamicFonts(hMainWindow);
     InitializeFullscreenModule(hMainWindow);
 
+    // 在窗口可见前初始化 D2D（避免首帧走 GDI 导致按钮闪烁）
     if (!D2DRenderer_Init(hMainWindow)) {
         OutputDebugStringW(L"Direct2D GPU 渲染器初始化失败，将使用 GDI 软渲染回退\n");
     }
