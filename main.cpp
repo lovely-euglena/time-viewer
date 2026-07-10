@@ -209,10 +209,8 @@ static void ShowHelpAndExit() {
         L"  -t, --transparency    设置窗口透明度 (0-255, 0=完全透明, 255=不透明)\n"
         L"  -h, --help            显示此帮助信息\n"
         L"  -v, --version         显示版本信息\n"
-        L"  --force-gdi           强制使用 GDI 软件渲染，不启用 Direct2D GPU 加速
-"
-        L"  --disable-gpu         同上，强制禁用 GPU 加速（与 --force-gdi 等效）
-"
+        L"  --force-gdi           强制使用 GDI 软件渲染，不启用 Direct2D GPU 加速\n"
+        L"  --disable-gpu         同上，强制禁用 GPU 加速（与 --force-gdi 等效）\n"
         L"  --font-name <名称>    指定显示字体（系统中已安装的字体族名称）\n"
         L"                        示例: --font-name \"Microsoft YaHei\"\n"
         L"  --font-path <路径>    从外部字体文件加载字体（支持 .ttf/.otf）\n"
