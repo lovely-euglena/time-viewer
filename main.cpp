@@ -123,6 +123,7 @@ bool g_topmost = false;
 bool g_givehelp = false;
 bool g_showVersion = false;    // 新增：显示版本信息
 bool g_forceGDI = false;       // --force-gdi / --disable-gpu：强制使用GDI而非GPU加速
+bool g_disableTouch = false;   // --disable-touch：禁用双击/触摸双击切换全屏
 bool g_showWarning = false;    // --show-warning：强制显示参数警告弹窗
 bool g_ignoreWarning = false;  // --ignore-warning / -w：忽略快捷方式启动参数警告
 bool g_isGuiLaunch = false;    // 是否为 GUI 环境启动（无父控制台，快捷方式/双击）
@@ -218,6 +219,7 @@ static void ShowHelpAndExit() {
         L"  -w, --ignore-warning  忽略快捷方式/双击启动时的参数警告弹窗\n"
         L"  --force-gdi           强制使用 GDI 软件渲染，不启用 Direct2D GPU 加速\n"
         L"  --disable-gpu         同上，强制禁用 GPU 加速（与 --force-gdi 等效）\n"
+        L"  --disable-touch       禁用双击标题栏/触摸双击切换全屏功能\n"
         L"  --font-name <名称>    指定显示字体（系统中已安装的字体族名称）\n"
         L"                        示例: --font-name \"Microsoft YaHei\"\n"
         L"  --font-path <路径>    从外部字体文件加载字体（支持 .ttf/.otf）\n"
@@ -236,7 +238,7 @@ static void ShowHelpAndExit() {
         L"  • 多显示器DPI自适应\n"
         L"  • 窗口圆角效果（Windows 11风格）\n"
         L"  • 透明度调节\n"
-        L"  • 触摸屏支持（双击切换全屏）\n"
+        L"  • 触摸屏支持（双击切换全屏，可用 --disable-touch 禁用）\n"
         L"  • 自动同步间隔：1小时\n"
         L"===========================================================\n"
         L"\n【使用示例】\n"
@@ -904,6 +906,9 @@ int WINAPI wWinMain(_In_ HINSTANCE hInstance,
             else if (wcscmp(argv[i], L"--force-gdi") == 0 || wcscmp(argv[i], L"--disable-gpu") == 0) {
                 g_forceGDI = true;
             }
+            else if (wcscmp(argv[i], L"--disable-touch") == 0) {
+                g_disableTouch = true;
+            }
             else {
                 // 无法识别的参数 → 报错并退出
                 wchar_t errMsg[384];
@@ -1372,8 +1377,10 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) 
     }
 
     case WM_NCLBUTTONDBLCLK: {
-        if (HandleNcLButtonDblClk(hWnd, wParam)) {
-            if (hFullscreenBtn) SetWindowTextW(hFullscreenBtn, IsFullscreen() ? L"窗口化 (F11)" : L"全屏 (F11)");
+        if (!g_disableTouch) {
+            if (HandleNcLButtonDblClk(hWnd, wParam)) {
+                if (hFullscreenBtn) SetWindowTextW(hFullscreenBtn, IsFullscreen() ? L"窗口化 (F11)" : L"全屏 (F11)");
+            }
         }
         break;
     }
@@ -1392,6 +1399,10 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) 
     }
 
     case WM_TOUCH: {
+        if (g_disableTouch) {
+            CloseTouchInputHandle((HTOUCHINPUT)lParam);
+            return 0;
+        }
         HandleTouchInput(hWnd, wParam, lParam);
         return 0;
     }
