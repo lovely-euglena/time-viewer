@@ -70,6 +70,10 @@ typedef struct DPI_AWARENESS_CONTEXT__ *DPI_AWARENESS_CONTEXT;
 #define TIMER_AUTO_SYNC     3
 #define AUTO_SYNC_INTERVAL_MS  3600000  // 1小时 = 3600000毫秒
 
+// 按钮自动隐藏定时参数
+#define AUTO_HIDE_IDLE_MS       5000  // 5秒无操作自动隐藏
+#define AUTO_HIDE_MANUAL_MS    10000  // 手动激活后10秒自动隐藏
+
 // 基准尺寸（96 DPI 下）
 #define BASE_MIN_WINDOW_WIDTH     600
 #define BASE_MIN_WINDOW_HEIGHT    400
@@ -120,6 +124,12 @@ bool g_noHotKeys = false;
 int  g_transparency = 255;
 bool g_startTopmost = false;
 bool g_topmost = false;
+
+// ===== 按钮自动隐藏状态 =====
+bool g_buttonsVisible = true;
+ULONGLONG g_lastInteractionTime = 0;
+bool g_manualShowActive = false;
+ULONGLONG g_manualShowStartTime = 0;
 bool g_givehelp = false;
 bool g_showVersion = false;    // 新增：显示版本信息
 bool g_forceGDI = false;       // --force-gdi / --disable-gpu：强制使用GDI而非GPU加速
@@ -159,6 +169,10 @@ void StartSync(HWND hWnd);
 void SyncThreadProc(HWND hWnd);
 FontSizes CalculateFontSizes(HWND hWnd);
 void ToggleTopmost(HWND hWnd);
+void ShowButtons(HWND hWnd);
+void HideButtons(HWND hWnd);
+void ResetInterActionTimer();
+void CheckAutoHide(HWND hWnd);
 
 int GetDisplayTime(SYSTEMTIME& st);
 std::wstring GetTimeDateStringEx();
@@ -595,6 +609,10 @@ void HandleTouchInput(HWND hWnd, WPARAM wParam, LPARAM lParam) {
                 ptInput.y = TOUCH_COORD_TO_PIXEL(ti.y);
                 ScreenToClient(hWnd, &ptInput);
                 if (ti.dwFlags & TOUCHEVENTF_DOWN) {
+                    if (!g_hideButtons) {
+                        ShowButtons(hWnd);
+                        ResetInterActionTimer();
+                    }
                     static ULONGLONG lastTouchTime = 0;
                     static POINT lastTouchPoint = { 0, 0 };
                     ULONGLONG currentTime = GetTickCount64();
@@ -619,6 +637,9 @@ void HandleTouchInput(HWND hWnd, WPARAM wParam, LPARAM lParam) {
 void StartSync(HWND hWnd) {
     if (g_syncing) return;
     g_syncing = true;
+    if (!g_hideButtons) {
+        ShowButtons(hWnd);
+    }
     if (hSyncBtn) SetWindowTextW(hSyncBtn, L"同步中...");
     if (g_syncThread.joinable()) g_syncThread.join();
     g_syncThread = std::thread(SyncThreadProc, hWnd);
@@ -695,6 +716,51 @@ void ToggleTopmost(HWND hWnd) {
         SetWindowTextW(hTopmostBtn, g_topmost ?
             (g_noHotKeys ? L"取消置顶" : L"消顶 (F6)") :
             (g_noHotKeys ? L"置顶" : L"置顶 (F6)"));
+    }
+}
+
+// ===== 按钮自动隐藏功能 =====
+
+void ShowButtons(HWND hWnd) {
+    if (g_hideButtons) return;
+    if (!hFullscreenBtn || !hExitBtn || !hSyncBtn || !hTopmostBtn) return;
+    if (!g_buttonsVisible) {
+        ShowWindow(hFullscreenBtn, SW_SHOW);
+        ShowWindow(hExitBtn, SW_SHOW);
+        ShowWindow(hSyncBtn, SW_SHOW);
+        ShowWindow(hTopmostBtn, SW_SHOW);
+        g_buttonsVisible = true;
+    }
+}
+
+void HideButtons(HWND hWnd) {
+    if (g_hideButtons) return;
+    if (!hFullscreenBtn || !hExitBtn || !hSyncBtn || !hTopmostBtn) return;
+    if (g_buttonsVisible) {
+        ShowWindow(hFullscreenBtn, SW_HIDE);
+        ShowWindow(hExitBtn, SW_HIDE);
+        ShowWindow(hSyncBtn, SW_HIDE);
+        ShowWindow(hTopmostBtn, SW_HIDE);
+        g_buttonsVisible = false;
+    }
+}
+
+void ResetInterActionTimer() {
+    g_lastInteractionTime = GetTickCount64();
+}
+
+void CheckAutoHide(HWND hWnd) {
+    if (g_hideButtons || !g_buttonsVisible) return;
+    if (g_manualShowActive) {
+        if (GetTickCount64() - g_manualShowStartTime >= AUTO_HIDE_MANUAL_MS) {
+            HideButtons(hWnd);
+            g_manualShowActive = false;
+            ResetInterActionTimer();
+        }
+        return;
+    }
+    if (GetTickCount64() - g_lastInteractionTime >= AUTO_HIDE_IDLE_MS) {
+        HideButtons(hWnd);
     }
 }
 
@@ -1134,6 +1200,10 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) 
     case WM_CREATE: {
         CreateButtons(hWnd);
         UpdateButtonLayout(hWnd);
+        if (!g_hideButtons) {
+            ResetInterActionTimer();
+            ShowButtons(hWnd);
+        }
         // 窗口最小尺寸在 WM_GETMINMAXINFO 中动态处理，不需要调用 SetWindowMinSize
         if (!g_noHotKeys) {
             RegisterHotKey(hWnd, 1, 0, VK_F11);
@@ -1323,6 +1393,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) 
             if (currentStr != lastTimeStr) { lastTimeStr = currentStr; needRedraw = true; }
             if (currentSource != lastSourceStr) { lastSourceStr = currentSource; needRedraw = true; }
             if (needRedraw) InvalidateRect(hWnd, NULL, FALSE);
+            CheckAutoHide(hWnd);
         }
         else if (wParam == 2) {
             if (hSyncBtn) SetWindowTextW(hSyncBtn, L"同步 (F5)");
@@ -1345,6 +1416,9 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) 
         }
         else if (ctrlId == ID_SYNC_BTN) {
             StartSync(hWnd);
+            ShowButtons(hWnd);
+            ResetInterActionTimer();
+            g_manualShowActive = false;
         }
         else if (ctrlId == ID_TOPMOST_BTN) {
             ToggleTopmost(hWnd);
@@ -1353,6 +1427,10 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) 
     }
 
     case WM_KEYDOWN: {
+        if (!g_hideButtons) {
+            ShowButtons(hWnd);
+            ResetInterActionTimer();
+        }
         if (!g_noHotKeys) {
             if (wParam == VK_F11) {
                 ToggleFullscreen(hWnd);
@@ -1391,12 +1469,75 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) 
         break;
     }
 
+    case WM_LBUTTONUP: {
+        if (!g_hideButtons && hFullscreenBtn && hExitBtn && hSyncBtn && hTopmostBtn) {
+            POINT pt = { LOWORD(lParam), HIWORD(lParam) };
+            bool inBtn = false;
+            HWND btns[] = { hFullscreenBtn, hExitBtn, hSyncBtn, hTopmostBtn };
+            for (HWND btn : btns) {
+                if (IsWindowVisible(btn)) {
+                    RECT btnRect;
+                    GetWindowRect(btn, &btnRect);
+                    MapWindowRect(HWND_DESKTOP, hWnd, &btnRect);
+                    if (PtInRect(&btnRect, pt)) {
+                        inBtn = true;
+                        break;
+                    }
+                }
+            }
+            if (!inBtn) {
+                if (g_buttonsVisible) {
+                    if (g_manualShowActive) {
+                        HideButtons(hWnd);
+                        g_manualShowActive = false;
+                        ResetInterActionTimer();
+                    } else {
+                        g_manualShowActive = true;
+                        g_manualShowStartTime = GetTickCount64();
+                    }
+                } else {
+                    ShowButtons(hWnd);
+                    g_manualShowActive = true;
+                    g_manualShowStartTime = GetTickCount64();
+                }
+            }
+        }
+        break;
+    }
+
+    case WM_MOUSEMOVE: {
+        if (!g_hideButtons) {
+            if (!g_buttonsVisible) {
+                ShowButtons(hWnd);
+            }
+            ResetInterActionTimer();
+            g_manualShowActive = false;
+        }
+        TRACKMOUSEEVENT tme = {};
+        tme.cbSize = sizeof(TRACKMOUSEEVENT);
+        tme.dwFlags = TME_LEAVE;
+        tme.hwndTrack = hWnd;
+        TrackMouseEvent(&tme);
+        break;
+    }
+
+    case WM_MOUSELEAVE: {
+        if (!g_hideButtons) {
+            ResetInterActionTimer();
+        }
+        break;
+    }
+
     case WM_TOUCH: {
         HandleTouchInput(hWnd, wParam, lParam);
         return 0;
     }
 
     case WM_HOTKEY: {
+        if (!g_hideButtons) {
+            ShowButtons(hWnd);
+            ResetInterActionTimer();
+        }
         if (wParam == 1) {
             ToggleFullscreen(hWnd);
             if (hFullscreenBtn) SetWindowTextW(hFullscreenBtn, IsFullscreen() ? L"窗口化 (F11)" : L"全屏 (F11)");
@@ -1426,6 +1567,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) 
         }
         if (hSyncBtn) EnableWindow(hSyncBtn, TRUE);
         g_syncing = false;
+        ResetInterActionTimer();
         SetTimer(hWnd, 2, 3000, NULL);
         break;
     }
