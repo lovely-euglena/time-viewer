@@ -1,5 +1,4 @@
 ﻿// main.cpp
-// main.cpp
 // Windows 11风格时间显示主程序
 // 修改：基于 DPI 动态调整所有尺寸上限（按钮、字体、窗口最小尺寸）
 
@@ -310,7 +309,7 @@ static void ShowHelpAndExit() {
             return pageLines;
         }
 
-        INPUT_RECORD ir;
+        INPUT_RECORD ir{};
         DWORD readCount = 0;
 
         // 循环读取输入事件，忽略不相关的事件（如鼠标移动）
@@ -1309,7 +1308,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) 
 
         if (D2DRenderer_IsAvailable()) {
             FontSizes fz = CalculateFontSizes(hWnd);
-            D2DRenderInfo info;
+            D2DRenderInfo info{};
             info.timeStr      = timeStr.c_str();
             info.dateStr      = dateStr.c_str();
             info.weekStr      = weekStr.c_str();
