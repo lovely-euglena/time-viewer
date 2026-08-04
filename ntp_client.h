@@ -148,6 +148,19 @@ extern "C" {
      */
     NTPLIB_API bool NTP_CALL GetLastNetworkTime(SYSTEMTIME* outTime);
 
+    /**
+     * @brief 取消正在进行的所有 NTP 操作
+     *
+     * 设置取消标志并关闭活动 socket，使阻塞的 recvfrom 立即返回 SOCKET_ERROR，
+     * 同步线程可在退出时调用此函数快速中断等待，避免 join 长时间阻塞。
+     */
+    NTPLIB_API void NTP_CALL CancelPendingOperations();
+
+    /**
+     * @brief 重置取消标志，使后续同步操作可正常执行
+     */
+    NTPLIB_API void NTP_CALL ResetCancel();
+
 #ifdef __cplusplus
 }
 #endif
