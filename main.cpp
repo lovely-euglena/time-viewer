@@ -53,6 +53,11 @@ typedef struct DPI_AWARENESS_CONTEXT__ *DPI_AWARENESS_CONTEXT;
 #define DWMWA_WINDOW_CORNER_PREFERENCE 33
 #endif
 
+// --- 电源广播常量 (Windows XP+) ---
+#ifndef PBT_APMRESUMEAUTOMATIC
+#define PBT_APMRESUMEAUTOMATIC 0x0012
+#endif
+
 #pragma comment(lib, "dwmapi.lib")
 #pragma comment(lib, "comctl32.lib")
 
@@ -1306,6 +1311,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) 
         std::wstring dateStr = timeDateStr.substr(firstNewLine + 1, secondNewLine - firstNewLine - 1);
         std::wstring weekStr = timeDateStr.substr(secondNewLine + 1);
 
+        bool d2dRendered = false;
         if (D2DRenderer_IsAvailable()) {
             FontSizes fz = CalculateFontSizes(hWnd);
             D2DRenderInfo info{};
@@ -1319,9 +1325,9 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) 
             info.weekFontSize   = fz.week;
             info.sourceFontSize = fz.source;
             info.boldTime       = true;
-            D2DRenderer_Render(hWnd, info);
+            d2dRendered = D2DRenderer_Render(hWnd, info);
         }
-        else {
+        if (!d2dRendered) {
             HDC memDC = CreateCompatibleDC(hdc);
             if (!memDC) { EndPaint(hWnd, &ps); break; }
             HBITMAP memBitmap = CreateCompatibleBitmap(hdc, width, height);
@@ -1580,6 +1586,15 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) 
         ResetInterActionTimer();
         SetTimer(hWnd, 2, 3000, NULL);
         break;
+    }
+
+    case WM_POWERBROADCAST: {
+        if (wParam == PBT_APMRESUMEAUTOMATIC) {
+            D2DRenderer_Cleanup();
+            D2DRenderer_Init(hWnd);
+            InvalidateRect(hWnd, NULL, FALSE);
+        }
+        return TRUE;
     }
 
     case WM_DESTROY: {
