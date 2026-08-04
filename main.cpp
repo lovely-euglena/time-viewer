@@ -629,8 +629,8 @@ void HandleTouchInput(HWND hWnd, WPARAM wParam, LPARAM lParam) {
                     lastTouchPoint = currentPoint;
                 }
             }
-            CloseTouchInputHandle((HTOUCHINPUT)lParam);
         }
+        CloseTouchInputHandle((HTOUCHINPUT)lParam);
         delete[] pInputs;
     }
 }
