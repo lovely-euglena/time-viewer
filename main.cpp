@@ -15,6 +15,7 @@
 #include <string>
 #include <thread>
 #include <atomic>
+#include <new>
 #include <cstdio>
 #include <cstdlib>
 #include <sstream>
@@ -548,11 +549,6 @@ void CreateDynamicFonts(HWND hWnd) {
     lastSizes = sizes;
     lastBtnFontSize = btnFontSize;
 
-    if (hLargeFont) { DeleteObject(hLargeFont); hLargeFont = nullptr; }
-    if (hDateFont) { DeleteObject(hDateFont); hDateFont = nullptr; }
-    if (hNormalFont) { DeleteObject(hNormalFont); hNormalFont = nullptr; }
-    if (hSourceFont) { DeleteObject(hSourceFont); hSourceFont = nullptr; }
-
     // 确定最终使用的字体族名称：
     //   1. 命令行指定字体（--font-name / --font-path）
     //   2. 嵌入字体（Source Han Sans Regular）
@@ -560,26 +556,37 @@ void CreateDynamicFonts(HWND hWnd) {
     const wchar_t* fontFamily = !g_fontFamilyToUse.empty() ? g_fontFamilyToUse.c_str() :
         (g_useEmbeddedFont ? FONT_FAMILY_EMBEDDED : FONT_FAMILY_FALLBACK);
 
-    hLargeFont = CreateFontW(
+    HFONT hNewLarge = CreateFontW(
         -sizes.time, 0, 0, 0, FW_BOLD,
         FALSE, FALSE, FALSE, DEFAULT_CHARSET,
         OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
         CLEARTYPE_QUALITY, DEFAULT_PITCH, fontFamily
     );
-
-    hDateFont = CreateFontW(
+    HFONT hNewDate = CreateFontW(
         -sizes.date, 0, 0, 0, FW_SEMIBOLD,
         FALSE, FALSE, FALSE, DEFAULT_CHARSET,
         OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
         CLEARTYPE_QUALITY, DEFAULT_PITCH, fontFamily
     );
-
-    hSourceFont = CreateFontW(
+    HFONT hNewSource = CreateFontW(
         -sizes.source, 0, 0, 0, FW_NORMAL,
         FALSE, FALSE, FALSE, DEFAULT_CHARSET,
         OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
         CLEARTYPE_QUALITY, DEFAULT_PITCH, fontFamily
     );
+
+    if (hNewLarge) {
+        if (hLargeFont) DeleteObject(hLargeFont);
+        hLargeFont = hNewLarge;
+    }
+    if (hNewDate) {
+        if (hDateFont) DeleteObject(hDateFont);
+        hDateFont = hNewDate;
+    }
+    if (hNewSource) {
+        if (hSourceFont) DeleteObject(hSourceFont);
+        hSourceFont = hNewSource;
+    }
 
     if (hFullscreenBtn && hExitBtn && hSyncBtn && hTopmostBtn && g_buttonHeight > 0) {
         HFONT hBtnFont = CreateFontW(
@@ -588,51 +595,54 @@ void CreateDynamicFonts(HWND hWnd) {
             OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
             CLEARTYPE_QUALITY, DEFAULT_PITCH, fontFamily
         );
-        // WM_SETFONT 最后一个参数用 FALSE：不立即强制重绘
-        // 按钮刷新由 UpdateButtonLayout 中的 InvalidateRect 统一管理
-        SendMessageW(hFullscreenBtn, WM_SETFONT, (WPARAM)hBtnFont, FALSE);
-        SendMessageW(hExitBtn,       WM_SETFONT, (WPARAM)hBtnFont, FALSE);
-        SendMessageW(hSyncBtn,       WM_SETFONT, (WPARAM)hBtnFont, FALSE);
-        SendMessageW(hTopmostBtn,    WM_SETFONT, (WPARAM)hBtnFont, FALSE);
-        hNormalFont = hBtnFont;
+        if (hBtnFont) {
+            SendMessageW(hFullscreenBtn, WM_SETFONT, (WPARAM)hBtnFont, FALSE);
+            SendMessageW(hExitBtn,       WM_SETFONT, (WPARAM)hBtnFont, FALSE);
+            SendMessageW(hSyncBtn,       WM_SETFONT, (WPARAM)hBtnFont, FALSE);
+            SendMessageW(hTopmostBtn,    WM_SETFONT, (WPARAM)hBtnFont, FALSE);
+            if (hNormalFont) DeleteObject(hNormalFont);
+            hNormalFont = hBtnFont;
+        }
     }
 }
 
 void HandleTouchInput(HWND hWnd, WPARAM wParam, LPARAM lParam) {
     UINT cInputs = LOWORD(wParam);
-    PTOUCHINPUT pInputs = new TOUCHINPUT[cInputs];
-    if (pInputs) {
-        if (GetTouchInputInfo((HTOUCHINPUT)lParam, cInputs, pInputs, sizeof(TOUCHINPUT))) {
-            POINT ptInput;
-            for (UINT i = 0; i < cInputs; i++) {
-                TOUCHINPUT ti = pInputs[i];
-                ptInput.x = TOUCH_COORD_TO_PIXEL(ti.x);
-                ptInput.y = TOUCH_COORD_TO_PIXEL(ti.y);
-                ScreenToClient(hWnd, &ptInput);
-                if (ti.dwFlags & TOUCHEVENTF_DOWN) {
-                    if (!g_hideButtons) {
-                        ShowButtons(hWnd);
-                        ResetInterActionTimer();
-                    }
-                    static ULONGLONG lastTouchTime = 0;
-                    static POINT lastTouchPoint = { 0, 0 };
-                    ULONGLONG currentTime = GetTickCount64();
-                    POINT currentPoint = ptInput;
-                    if ((currentTime - lastTouchTime) < 500 &&
-                        abs(currentPoint.x - lastTouchPoint.x) < 50 &&
-                        abs(currentPoint.y - lastTouchPoint.y) < 50) {
-                        ToggleFullscreen(hWnd);
-                        if (hFullscreenBtn)
-                            SetWindowTextW(hFullscreenBtn, IsFullscreen() ? L"窗口化 (F11)" : L"全屏 (F11)");
-                    }
-                    lastTouchTime = currentTime;
-                    lastTouchPoint = currentPoint;
-                }
-            }
-            CloseTouchInputHandle((HTOUCHINPUT)lParam);
-        }
-        delete[] pInputs;
+    PTOUCHINPUT pInputs = new (std::nothrow) TOUCHINPUT[cInputs];
+    if (!pInputs) {
+        CloseTouchInputHandle((HTOUCHINPUT)lParam);
+        return;
     }
+    if (GetTouchInputInfo((HTOUCHINPUT)lParam, cInputs, pInputs, sizeof(TOUCHINPUT))) {
+        POINT ptInput;
+        for (UINT i = 0; i < cInputs; i++) {
+            TOUCHINPUT ti = pInputs[i];
+            ptInput.x = TOUCH_COORD_TO_PIXEL(ti.x);
+            ptInput.y = TOUCH_COORD_TO_PIXEL(ti.y);
+            ScreenToClient(hWnd, &ptInput);
+            if (ti.dwFlags & TOUCHEVENTF_DOWN) {
+                if (!g_hideButtons) {
+                    ShowButtons(hWnd);
+                    ResetInterActionTimer();
+                }
+                static ULONGLONG lastTouchTime = 0;
+                static POINT lastTouchPoint = { 0, 0 };
+                ULONGLONG currentTime = GetTickCount64();
+                POINT currentPoint = ptInput;
+                if ((currentTime - lastTouchTime) < 500 &&
+                    abs(currentPoint.x - lastTouchPoint.x) < 50 &&
+                    abs(currentPoint.y - lastTouchPoint.y) < 50) {
+                    ToggleFullscreen(hWnd);
+                    if (hFullscreenBtn)
+                        SetWindowTextW(hFullscreenBtn, IsFullscreen() ? L"窗口化 (F11)" : L"全屏 (F11)");
+                }
+                lastTouchTime = currentTime;
+                lastTouchPoint = currentPoint;
+            }
+        }
+        CloseTouchInputHandle((HTOUCHINPUT)lParam);
+    }
+    delete[] pInputs;
 }
 
 void StartSync(HWND hWnd) {
