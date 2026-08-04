@@ -6,6 +6,8 @@
 #include <windows.h>
 #include <winuser.h>
 
+extern bool g_topmost;
+
 // 静态变量用于保存全屏状态和窗口原始信息
 static bool g_bFullscreen = false;                    // 全屏状态标志
 static WINDOWPLACEMENT g_wpPrev = { sizeof(g_wpPrev) }; // 保存窗口原始位置和大小
@@ -72,9 +74,9 @@ bool ToggleFullscreen(HWND hWnd) {
         // 恢复原始窗口位置和大小
         SetWindowPlacement(hWnd, &g_wpPrev);
 
-        // 取消置顶
-        SetWindowPos(hWnd, HWND_NOTOPMOST, 0, 0, 0, 0,
-            SWP_NOMOVE | SWP_NOSIZE | SWP_FRAMECHANGED);
+        SetWindowPos(hWnd,
+            g_topmost ? HWND_TOPMOST : HWND_NOTOPMOST,
+            0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_FRAMECHANGED);
 
         // ===== 添加：恢复后确保满足最小尺寸和比例限制 =====
         RECT rc;
