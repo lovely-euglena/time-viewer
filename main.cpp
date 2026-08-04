@@ -1265,8 +1265,12 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) 
                 pRect->bottom = pRect->top + minHeight;
         }
 
+        int ratioW = pRect->right - pRect->left;
+        int ratioH = pRect->bottom - pRect->top;
+        if (ratioH <= 0 || ratioW <= 0) return TRUE;
+
         float minRatio = 6.0f / 5.0f;
-        float currentRatio = (float)(pRect->right - pRect->left) / (pRect->bottom - pRect->top);
+        float currentRatio = (float)ratioW / ratioH;
         if (currentRatio < minRatio) {
             int targetWidth = (int)((pRect->bottom - pRect->top) * minRatio);
             if (wParam == WMSZ_LEFT || wParam == WMSZ_BOTTOMLEFT || wParam == WMSZ_TOPLEFT)
