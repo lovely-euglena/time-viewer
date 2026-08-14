@@ -1464,11 +1464,14 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) 
     }
 
     case WM_NCLBUTTONDBLCLK: {
+        bool handled = false;
         if (!g_disableTouch) {
-            if (HandleNcLButtonDblClk(hWnd, wParam)) {
-                if (hFullscreenBtn) SetWindowTextW(hFullscreenBtn, IsFullscreen() ? L"窗口化 (F11)" : L"全屏 (F11)");
+            handled = HandleNcLButtonDblClk(hWnd, wParam);
+            if (handled && hFullscreenBtn) {
+                SetWindowTextW(hFullscreenBtn, IsFullscreen() ? L"窗口化 (F11)" : L"全屏 (F11)");
             }
         }
+        if (!handled) return DefWindowProcW(hWnd, message, wParam, lParam);
         break;
     }
 
