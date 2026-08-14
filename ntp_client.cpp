@@ -181,8 +181,8 @@ private:
         LONGLONG rtt_ticks = end_time.QuadPart - start_time.QuadPart;
         int rtt_ms = (int)((rtt_ticks * 1000) / freq.QuadPart);
 
-        ULONG trans_sec = ntohl(response.ReceiveTimestampSec);
-        ULONG trans_frac = ntohl(response.ReceiveTimestampFrac);
+        ULONG trans_sec = ntohl(response.TransmitTimestampSec);
+        ULONG trans_frac = ntohl(response.TransmitTimestampFrac);
         network_time = ConvertToUnixTime(trans_sec, trans_frac);
 
         closesocket(sock);
@@ -431,22 +431,6 @@ extern "C" {
         if (g_ntpClient != nullptr) {
             delete g_ntpClient;
             g_ntpClient = nullptr;
-        }
-    }
-
-    NTPLIB_API time_t NTP_CALL GetNetworkTime(int& error_code) {
-        if (!g_ntpClient) {
-            error_code = NTP_SOCKET_ERROR;
-            return 0;
-        }
-        if (g_ntpClient->SyncTimeOnce()) {
-            error_code = NTP_ERROR_NONE;
-            // 注意：这里返回的仍然是本地时间，建议使用 SyncTimeOnce + GetLastNetworkTime
-            return time(NULL);
-        }
-        else {
-            error_code = NTP_INVALID_RESPONSE;
-            return 0;
         }
     }
 

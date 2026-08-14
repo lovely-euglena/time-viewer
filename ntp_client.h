@@ -101,12 +101,6 @@ extern "C" {
     NTPLIB_API void NTP_CALL CleanupNTPClient();
 
     /**
-     * @brief 获取网络时间（已废弃，保留兼容）
-     * @deprecated 使用 SyncTimeOnce + GetLastNetworkTime 代替
-     */
-    NTPLIB_API time_t NTP_CALL GetNetworkTime(int& error_code);
-
-    /**
      * @brief 立即执行一次时间同步
      */
     NTPLIB_API bool NTP_CALL SyncTimeOnce();
