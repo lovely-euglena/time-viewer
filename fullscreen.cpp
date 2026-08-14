@@ -82,9 +82,11 @@ bool ToggleFullscreen(HWND hWnd) {
         int width = rc.right - rc.left;
         int height = rc.bottom - rc.top;
 
-        // 检查最小尺寸
-        int minWidth = 500;
-        int minHeight = 300;
+        // 检查最小尺寸（DPI 缩放，与 main.cpp BASE_MIN_WINDOW_WIDTH/HEIGHT 保持一致）
+        UINT dpi = GetWindowDpi(hWnd);
+        float scale = dpi / 96.0f;
+        int minWidth = (int)(600 * scale);
+        int minHeight = (int)(400 * scale);
 
         // 需要加上边框计算实际客户区最小尺寸
         RECT minRect = { 0, 0, minWidth, minHeight };
@@ -173,17 +175,6 @@ bool HandleNcLButtonDblClk(HWND hWnd, WPARAM wParam)
  */
 void HandleGetMinMaxInfo(LPARAM lParam)
 {
-    LPMINMAXINFO lpMMI = (LPMINMAXINFO)lParam;
-
-    // 设置最小跟踪大小，避免窗口过小
-    lpMMI->ptMinTrackSize.x = 500;  // 最小宽度
-    lpMMI->ptMinTrackSize.y = 400;  // 最小高度
-
-    if (g_bFullscreen)
-    {
-        // 全屏状态下可以设置更小的限制（但实际上全屏时不会用到）
-        // 这里保持和普通窗口一致或更小
-    }
 }
 
 /**

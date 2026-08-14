@@ -1484,7 +1484,6 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) 
             GetWindowLong(hWnd, GWL_EXSTYLE));
         lpMMI->ptMinTrackSize.x = rc.right - rc.left;
         lpMMI->ptMinTrackSize.y = rc.bottom - rc.top;
-        HandleGetMinMaxInfo(lParam);
         break;
     }
 
