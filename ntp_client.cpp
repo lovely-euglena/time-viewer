@@ -181,8 +181,8 @@ private:
         LONGLONG rtt_ticks = end_time.QuadPart - start_time.QuadPart;
         int rtt_ms = (int)((rtt_ticks * 1000) / freq.QuadPart);
 
-        ULONG trans_sec = ntohl(response.ReceiveTimestampSec);
-        ULONG trans_frac = ntohl(response.ReceiveTimestampFrac);
+        ULONG trans_sec = ntohl(response.TransmitTimestampSec);
+        ULONG trans_frac = ntohl(response.TransmitTimestampFrac);
         network_time = ConvertToUnixTime(trans_sec, trans_frac);
 
         closesocket(sock);
