@@ -133,6 +133,8 @@ ULONGLONG g_manualShowStartTime = 0;
 bool g_givehelp = false;
 bool g_showVersion = false;    // 新增：显示版本信息
 bool g_forceGDI = false;       // --force-gdi / --disable-gpu：强制使用GDI而非GPU加速
+bool g_noAutoHide = false;     // --no-auto-hide：禁用按钮自动隐藏
+bool g_noAnim = false;         // --no-animation：禁用按钮显示/隐藏动画
 bool g_disableTouch = false;   // --disable-touch：禁用双击/触摸双击切换全屏
 bool g_showWarning = false;    // --show-warning：强制显示参数警告弹窗
 bool g_ignoreWarning = false;  // --ignore-warning / -w：忽略快捷方式启动参数警告
@@ -234,6 +236,8 @@ static void ShowHelpAndExit() {
         L"  --force-gdi           强制使用 GDI 软件渲染，不启用 Direct2D GPU 加速\n"
         L"  --disable-gpu         同上，强制禁用 GPU 加速（与 --force-gdi 等效）\n"
         L"  --disable-touch       禁用双击标题栏/触摸双击切换全屏功能\n"
+        L"  --no-auto-hide        禁用按钮自动隐藏，按钮始终显示\n"
+        L"  --no-animation       禁用按钮显示/隐藏的淡入淡出动画\n"
         L"  --font-name <名称>    指定显示字体（系统中已安装的字体族名称）\n"
         L"                        示例: --font-name \"Microsoft YaHei\"\n"
         L"  --font-path <路径>    从外部字体文件加载字体（支持 .ttf/.otf）\n"
@@ -736,10 +740,15 @@ void ShowButtons(HWND hWnd) {
     if (g_hideButtons) return;
     if (!hFullscreenBtn || !hExitBtn || !hSyncBtn || !hTopmostBtn) return;
     if (!g_buttonsVisible) {
-        ShowWindow(hFullscreenBtn, SW_SHOW);
-        ShowWindow(hExitBtn, SW_SHOW);
-        ShowWindow(hSyncBtn, SW_SHOW);
-        ShowWindow(hTopmostBtn, SW_SHOW);
+        HWND btns[] = { hFullscreenBtn, hExitBtn, hSyncBtn, hTopmostBtn };
+        if (g_noAnim) {
+            for (HWND btn : btns) ShowWindow(btn, SW_SHOW);
+        } else {
+            for (HWND btn : btns) {
+                if (!AnimateWindow(btn, 200, AW_BLEND))
+                    ShowWindow(btn, SW_SHOW);
+            }
+        }
         g_buttonsVisible = true;
     }
 }
@@ -748,10 +757,15 @@ void HideButtons(HWND hWnd) {
     if (g_hideButtons) return;
     if (!hFullscreenBtn || !hExitBtn || !hSyncBtn || !hTopmostBtn) return;
     if (g_buttonsVisible) {
-        ShowWindow(hFullscreenBtn, SW_HIDE);
-        ShowWindow(hExitBtn, SW_HIDE);
-        ShowWindow(hSyncBtn, SW_HIDE);
-        ShowWindow(hTopmostBtn, SW_HIDE);
+        HWND btns[] = { hFullscreenBtn, hExitBtn, hSyncBtn, hTopmostBtn };
+        if (g_noAnim) {
+            for (HWND btn : btns) ShowWindow(btn, SW_HIDE);
+        } else {
+            for (HWND btn : btns) {
+                if (!AnimateWindow(btn, 200, AW_BLEND | AW_HIDE))
+                    ShowWindow(btn, SW_HIDE);
+            }
+        }
         g_buttonsVisible = false;
     }
 }
@@ -761,7 +775,7 @@ void ResetInterActionTimer() {
 }
 
 void CheckAutoHide(HWND hWnd) {
-    if (g_hideButtons || !g_buttonsVisible) return;
+    if (g_hideButtons || !g_buttonsVisible || g_noAutoHide) return;
     if (g_manualShowActive) {
         if (GetTickCount64() - g_manualShowStartTime >= AUTO_HIDE_MANUAL_MS) {
             HideButtons(hWnd);
@@ -980,6 +994,12 @@ int WINAPI wWinMain(_In_ HINSTANCE hInstance,
             }
             else if (wcscmp(argv[i], L"--force-gdi") == 0 || wcscmp(argv[i], L"--disable-gpu") == 0) {
                 g_forceGDI = true;
+            }
+            else if (wcscmp(argv[i], L"--no-auto-hide") == 0) {
+                g_noAutoHide = true;
+            }
+            else if (wcscmp(argv[i], L"--no-animation") == 0) {
+                g_noAnim = true;
             }
             else if (wcscmp(argv[i], L"--disable-touch") == 0) {
                 g_disableTouch = true;
