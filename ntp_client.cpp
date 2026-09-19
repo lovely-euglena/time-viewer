@@ -41,6 +41,10 @@ private:
     bool m_hasNetworkTime;
     CRITICAL_SECTION m_timeLock;
 
+    // ===== 取消机制 =====
+    std::atomic<bool> m_cancelFlag{ false };
+    std::mutex m_sockMutex;
+
     // 初始化Winsock
     int InitializeWinsock() {
         if (WSAStartup(MAKEWORD(2, 2), &wsaData) != 0) {
@@ -145,11 +149,19 @@ private:
 
     // 单次同步（内部）
     int SyncOnceWithServer(const std::wstring& host, time_t& network_time) {
+        if (m_cancelFlag.load()) {
+            return NTP_RECV_ERROR;
+        }
+
         sockaddr_in server_addr;
         int resolve_result = ResolveHost(host, server_addr);
         if (resolve_result != NTP_ERROR_NONE) {
             UpdateServerHealth(host, INT_MAX, false);
             return resolve_result;
+        }
+
+        if (m_cancelFlag.load()) {
+            return NTP_RECV_ERROR;
         }
 
         int sock_result = CreateSocket();
@@ -161,18 +173,36 @@ private:
         QueryPerformanceFrequency(&freq);
         QueryPerformanceCounter(&start_time);
 
-        int send_result = SendRequest(sock, server_addr);
+        int send_result;
+        {
+            std::lock_guard<std::mutex> lock(m_sockMutex);
+            send_result = SendRequest(sock, server_addr);
+        }
         if (send_result != NTP_ERROR_NONE) {
-            closesocket(sock);
-            sock = INVALID_SOCKET;
+            {
+                std::lock_guard<std::mutex> lock(m_sockMutex);
+                if (sock != INVALID_SOCKET) {
+                    closesocket(sock);
+                    sock = INVALID_SOCKET;
+                }
+            }
             return send_result;
         }
 
         NTP_PACKET response;
-        int recv_result = ReceiveResponse(sock, response);
+        int recv_result;
+        {
+            std::lock_guard<std::mutex> lock(m_sockMutex);
+            recv_result = ReceiveResponse(sock, response);
+        }
         if (recv_result != NTP_ERROR_NONE) {
-            closesocket(sock);
-            sock = INVALID_SOCKET;
+            {
+                std::lock_guard<std::mutex> lock(m_sockMutex);
+                if (sock != INVALID_SOCKET) {
+                    closesocket(sock);
+                    sock = INVALID_SOCKET;
+                }
+            }
             UpdateServerHealth(host, INT_MAX, false);
             return recv_result;
         }
@@ -186,8 +216,13 @@ private:
         ULONG trans_frac = ntohl(response.TransmitTimestampFrac);
         network_time = ConvertToUnixTime(trans_sec, trans_frac);
 
-        closesocket(sock);
-        sock = INVALID_SOCKET;
+        {
+            std::lock_guard<std::mutex> lock(m_sockMutex);
+            if (sock != INVALID_SOCKET) {
+                closesocket(sock);
+                sock = INVALID_SOCKET;
+            }
+        }
 
         UpdateServerHealth(host, rtt_ms, true);
         return NTP_ERROR_NONE;
@@ -292,6 +327,10 @@ public:
         int success_count = 0;
 
         for (int retry = 0; retry < MAX_RETRY_COUNT && success_count == 0; ++retry) {
+            if (m_cancelFlag.load()) {
+                break;
+            }
+
             std::vector<std::wstring> hosts_to_try;
             std::wstring best = GetBestServer();
             if (!best.empty()) {
@@ -308,6 +347,9 @@ public:
             }
 
             for (const auto& host : hosts_to_try) {
+                if (m_cancelFlag.load()) {
+                    break;
+                }
                 int result = SyncOnceWithServer(host, network_time);
                 if (result == NTP_ERROR_NONE) {
                     success_count++;
@@ -338,6 +380,9 @@ public:
                     break;
                 }
                 else if (retry < MAX_RETRY_COUNT - 1) {
+                    if (m_cancelFlag.load()) {
+                        break;
+                    }
                     ApplyBackoffDelay(retry);
                 }
             }
@@ -408,6 +453,19 @@ public:
         }
         return NTP_ERROR_NONE;
     }
+
+    void CancelPendingOperations() {
+        m_cancelFlag.store(true);
+        std::lock_guard<std::mutex> lock(m_sockMutex);
+        if (sock != INVALID_SOCKET) {
+            closesocket(sock);
+            sock = INVALID_SOCKET;
+        }
+    }
+
+    void ResetCancel() {
+        m_cancelFlag.store(false);
+    }
 };
 
 // 全局NTP客户端实例
@@ -470,6 +528,14 @@ extern "C" {
     NTPLIB_API bool NTP_CALL GetLastNetworkTime(SYSTEMTIME* outTime) {
         if (!g_ntpClient || !outTime) return false;
         return g_ntpClient->GetLastNetworkTime(outTime);
+    }
+
+    NTPLIB_API void NTP_CALL CancelPendingOperations() {
+        if (g_ntpClient) g_ntpClient->CancelPendingOperations();
+    }
+
+    NTPLIB_API void NTP_CALL ResetCancel() {
+        if (g_ntpClient) g_ntpClient->ResetCancel();
     }
 
 } // extern "C"

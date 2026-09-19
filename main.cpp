@@ -657,7 +657,11 @@ void StartSync(HWND hWnd) {
         ShowButtons(hWnd);
     }
     if (hSyncBtn) SetWindowTextW(hSyncBtn, L"同步中...");
-    if (g_syncThread.joinable()) g_syncThread.join();
+    ResetCancel();
+    if (g_syncThread.joinable()) {
+        CancelPendingOperations();
+        g_syncThread.join();
+    }
     g_syncThread = std::thread(SyncThreadProc, hWnd);
 }
 
@@ -1221,7 +1225,10 @@ int WINAPI wWinMain(_In_ HINSTANCE hInstance,
     }
 
     g_exitFlag = true;
-    if (g_syncThread.joinable()) g_syncThread.join();
+    if (g_syncThread.joinable()) {
+        CancelPendingOperations();
+        g_syncThread.join();
+    }
 
     CleanupNTPClient();
     CleanupFullscreenModule();
