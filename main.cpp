@@ -11,6 +11,7 @@
 #include <dwmapi.h>
 #include <commctrl.h>
 #include <shellapi.h>
+#include <strsafe.h>
 // 其余头文件
 #include <string>
 #include <thread>
@@ -431,7 +432,7 @@ std::wstring GetTimeDateStringEx() {
     GetDisplayTime(st);
 
     wchar_t timeStr[64];
-    wsprintfW(timeStr, L"%02d:%02d:%02d\n%04d-%02d-%02d",
+    StringCchPrintfW(timeStr, _countof(timeStr), L"%02d:%02d:%02d\n%04d-%02d-%02d",
         st.wHour, st.wMinute, st.wSecond,
         st.wYear, st.wMonth, st.wDay);
 
@@ -852,7 +853,7 @@ static bool LoadFontFromPath(const std::wstring& fontPath) {
     int added = AddFontResourceExW(fontPath.c_str(), FR_PRIVATE, 0);
     if (added == 0) {
         wchar_t errMsg[512];
-        wsprintfW(errMsg, L"错误: 无法加载字体文件 '%s'，文件可能不是有效的字体格式或已被损坏\n", fontPath.c_str());
+        StringCchPrintfW(errMsg, _countof(errMsg), L"错误: 无法加载字体文件 '%s'，文件可能不是有效的字体格式或已被损坏\n", fontPath.c_str());
         ReportError(errMsg);
         return false;
     }
@@ -937,7 +938,7 @@ int WINAPI wWinMain(_In_ HINSTANCE hInstance,
                 const wchar_t* valStr = argv[++i];
                 if (!IsNumericString(valStr)) {
                     wchar_t errMsg[256];
-                    wsprintfW(errMsg, L"错误: --transparency/-t 的参数 '%s' 不是有效的数字\n", valStr);
+                    StringCchPrintfW(errMsg, _countof(errMsg), L"错误: --transparency/-t 的参数 '%s' 不是有效的数字\n", valStr);
                     ReportError(errMsg);
                     LocalFree(argv);
                     return 1;
@@ -945,7 +946,7 @@ int WINAPI wWinMain(_In_ HINSTANCE hInstance,
                 int val = _wtoi(valStr);
                 if (val < 0 || val > 255) {
                     wchar_t errMsg[256];
-                    wsprintfW(errMsg, L"错误: 透明度值 %d 超出有效范围，允许值为 0-255\n", val);
+                    StringCchPrintfW(errMsg, _countof(errMsg), L"错误: 透明度值 %d 超出有效范围，允许值为 0-255\n", val);
                     ReportError(errMsg);
                     LocalFree(argv);
                     return 1;
@@ -1007,7 +1008,7 @@ int WINAPI wWinMain(_In_ HINSTANCE hInstance,
             else {
                 // 无法识别的参数 → 报错并退出
                 wchar_t errMsg[384];
-                wsprintfW(errMsg, L"错误: 无法识别的选项 '%s'\n使用 --help/-h 查看所有可用选项\n", argv[i]);
+                StringCchPrintfW(errMsg, _countof(errMsg), L"错误: 无法识别的选项 '%s'\n使用 --help/-h 查看所有可用选项\n", argv[i]);
                 ReportError(errMsg);
                 LocalFree(argv);
                 return 1;
@@ -1054,7 +1055,7 @@ int WINAPI wWinMain(_In_ HINSTANCE hInstance,
         if (g_cmdFontName.empty()) {
             g_fontFamilyToUse = GuessFontNameFromPath(g_cmdFontPath);
             wchar_t logMsg[512];
-            wsprintfW(logMsg, L"从文件名推断字体族名称: %s\n", g_fontFamilyToUse.c_str());
+            StringCchPrintfW(logMsg, _countof(logMsg), L"从文件名推断字体族名称: %s\n", g_fontFamilyToUse.c_str());
             PrintToConsole(logMsg);
         } else {
             g_fontFamilyToUse = g_cmdFontName;
@@ -1102,7 +1103,7 @@ int WINAPI wWinMain(_In_ HINSTANCE hInstance,
     if (!RegisterClassExW(&wcex)) {
         DWORD err = GetLastError();
         wchar_t msg[256];
-        wsprintfW(msg, L"窗口类注册失败！\n错误码: %lu\ncbSize: %u", err, wcex.cbSize);
+        StringCchPrintfW(msg, _countof(msg), L"窗口类注册失败！\n错误码: %lu\ncbSize: %u", err, wcex.cbSize);
         MessageBoxW(nullptr, msg, L"错误", MB_ICONERROR);
         return 1;
     }
@@ -1171,7 +1172,7 @@ int WINAPI wWinMain(_In_ HINSTANCE hInstance,
         }
     } else {
         wchar_t logMsg[256];
-        wsprintfW(logMsg, L"使用命令行指定字体: %s\n", g_fontFamilyToUse.c_str());
+        StringCchPrintfW(logMsg, _countof(logMsg), L"使用命令行指定字体: %s\n", g_fontFamilyToUse.c_str());
         OutputDebugStringW(logMsg);
     }
 

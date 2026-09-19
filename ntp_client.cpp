@@ -10,6 +10,7 @@
 #include <iostream>
 #include <vector>
 #include <string>
+#include <cstdlib>
 #include <thread>
 #include <mutex>
 #include <chrono>
@@ -264,7 +265,7 @@ public:
         if (servers.size() >= NTP_SERVER_MAX_COUNT) return;
 
         NTP_SERVER_INFO info = {};
-        wcscpy_s(info.serverName, host.c_str());
+        wcsncpy_s(info.serverName, _countof(info.serverName), host.c_str(), _TRUNCATE);
         info.port = NTP_SERVER_PORT;
         info.responseTime = 0;
         info.status = SERVER_UNKNOWN;
