@@ -5,6 +5,19 @@
     version="1.0.0.0"
     type="win32"
   />
+  <!-- ComCtl32 v6 视觉样式：Windows 11 上按钮由系统绘制为圆角（Win7~10 使用系统默认外观） -->
+  <dependency>
+    <dependentAssembly>
+      <assemblyIdentity
+        type="win32"
+        name="Microsoft.Windows.Common-Controls"
+        version="6.0.0.0"
+        processorArchitecture="*"
+        publicKeyToken="6595b64144ccf1df"
+        language="*"
+      />
+    </dependentAssembly>
+  </dependency>
   <application xmlns="urn:schemas-microsoft-com:asm.v3">
     <windowsSettings>
       <!-- Win7+: 系统DPI感知（兼容回退） -->

@@ -161,7 +161,6 @@
       <AdditionalDependencies>dwmapi.lib;ws2_32.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <EntryPointSymbol>wWinMainCRTStartup</EntryPointSymbol>
       <OutputFile>$(OutDir)$(TargetName)$(TargetExt)</OutputFile>
-      <AdditionalManifestFiles>app.manifest</AdditionalManifestFiles>
     </Link>
     <PostBuildEvent>
       <Command />
@@ -339,6 +338,12 @@
       <Command>
       </Command>
     </PreBuildEvent>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup>
+    <Manifest>
+      <!-- 所有配置均嵌入 app.manifest：启用 ComCtl32 v6 视觉样式，Win11 上按钮由系统绘制为圆角 -->
+      <AdditionalManifestFiles>app.manifest</AdditionalManifestFiles>
+    </Manifest>
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="help.cpp">
