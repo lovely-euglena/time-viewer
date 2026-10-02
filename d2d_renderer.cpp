@@ -7,12 +7,40 @@
 #include <d2d1.h>
 #include <dwrite.h>
 
-// d2d1.dll / dwrite.dll 使用静态链接（__stdcall 调用约定与 GetProcAddress 兼容性更好）
-// 新版 SDK 的 d2d1.dll 要求窗口可见时创建 HWND RenderTarget，已通过 GetDpi→GDI DPI 规避
-#pragma comment(lib, "d2d1.lib")
-#pragma comment(lib, "dwrite.lib")
+// ===== 动态加载 d2d1.dll / dwrite.dll（Windows 7 兼容） =====
+// Win7 未安装平台更新（KB2670838）时系统没有 d2d1.dll；若静态导入，进程会在
+// 启动时因缺少 DLL 直接失败，GDI 回退逻辑没有机会执行。改为运行时按名称加载：
+// 加载失败时 D2DRenderer_Init 返回 false，由调用方回退 GDI 渲染。
+// （按名称加载也比静态导入库的序号引用更稳，不同系统版本的导出序号可能不同）
 
 namespace {
+
+    // d2d1.dll / dwrite.dll 运行时函数指针
+    HMODULE g_hD2D1Lib = nullptr;
+    HMODULE g_hDWriteLib = nullptr;
+
+    HRESULT(WINAPI* g_pfnD2D1CreateFactory)(
+        D2D1_FACTORY_TYPE, REFIID, const D2D1_FACTORY_OPTIONS*, void**) = nullptr;
+    HRESULT(WINAPI* g_pfnDWriteCreateFactory)(
+        DWRITE_FACTORY_TYPE, REFIID, IUnknown**) = nullptr;
+
+    bool LoadRenderLibraries() {
+        if (!g_hD2D1Lib) {
+            g_hD2D1Lib = LoadLibraryW(L"d2d1.dll");
+        }
+        if (g_hD2D1Lib && !g_pfnD2D1CreateFactory) {
+            g_pfnD2D1CreateFactory = reinterpret_cast<decltype(g_pfnD2D1CreateFactory)>(
+                GetProcAddress(g_hD2D1Lib, "D2D1CreateFactory"));
+        }
+        if (!g_hDWriteLib) {
+            g_hDWriteLib = LoadLibraryW(L"dwrite.dll");
+        }
+        if (g_hDWriteLib && !g_pfnDWriteCreateFactory) {
+            g_pfnDWriteCreateFactory = reinterpret_cast<decltype(g_pfnDWriteCreateFactory)>(
+                GetProcAddress(g_hDWriteLib, "DWriteCreateFactory"));
+        }
+        return g_pfnD2D1CreateFactory != nullptr && g_pfnDWriteCreateFactory != nullptr;
+    }
 
     // ===== D2D 资源（全局，单窗口单例） =====
     // 渲染管线资源
@@ -108,14 +136,18 @@ bool D2DRenderer_Init(HWND hWnd) {
     if (g_initialized) return true;
     if (!hWnd || !IsWindow(hWnd)) return false;
 
-    HRESULT hr = D2D1CreateFactory(
+    // Win7 无平台更新时 d2d1.dll/dwrite.dll 可能不存在，直接失败由调用方回退 GDI
+    if (!LoadRenderLibraries()) return false;
+
+    HRESULT hr = g_pfnD2D1CreateFactory(
         D2D1_FACTORY_TYPE_SINGLE_THREADED,
         __uuidof(ID2D1Factory),
+        nullptr,
         (void**)&g_d2dFactory);
     if (FAILED(hr) || !g_d2dFactory) return false;
 
     IUnknown* dwriteTemp = nullptr;
-    hr = DWriteCreateFactory(
+    hr = g_pfnDWriteCreateFactory(
         DWRITE_FACTORY_TYPE_SHARED,
         __uuidof(IDWriteFactory),
         &dwriteTemp);

@@ -20,7 +20,7 @@ A feature-rich Windows desktop time display application supporting NTP network t
 
 ## System Requirements
 
-- Windows 7 or later (Direct2D requires KB971644 Platform Update)
+- Windows 7 or later (Direct2D requires KB2670838 Platform Update; falls back to GDI rendering when it is missing)
 - Visual Studio 2019 / 2022 / 2026 (recommended, using v142/v143/v145 toolset)
 - Windows SDK 10.0+
 

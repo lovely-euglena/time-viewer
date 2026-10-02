@@ -23,7 +23,7 @@
 
 ## 系统要求
 
-- Windows 7 或更高版本（Direct2D 需要 KB971644 平台更新）
+- Windows 7 或更高版本（Direct2D 需要 KB2670838 平台更新；未安装时自动回退到 GDI 渲染）
 - Visual Studio 2019 / 2022 / 2026（推荐，使用 v142/v143/v145 工具集）
 - Windows SDK 10.0+
 
