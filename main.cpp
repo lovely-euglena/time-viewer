@@ -25,6 +25,7 @@
 #include "fullscreen.h"
 #include "ntp_client.h"
 #include "resource.h"
+#include "debug_log.h"
 
 // ===== Windows 7 兼容：手动定义 Windows 10/11 新增的类型和常量 =====
 // 当 _WIN32_WINNT=0x0601 (Win7) 时，旧版 SDK 头文件不会导出这些类型/常量
@@ -270,6 +271,8 @@ static void PrintToConsole(const wchar_t* msg) {
 // - 控制台启动：临时附加父控制台后输出（附加完即分离）；
 // - 双击/快捷方式等无控制台环境：仅 OutputDebugString。
 static void WriteToStderr(const wchar_t* msg) {
+    DebugLogRaw(msg);  // 记录到调试日志（未启用 --debug 时仅调试器可见）
+
     HANDLE hErr = GetStdHandle(STD_ERROR_HANDLE);
     if (hErr && hErr != INVALID_HANDLE_VALUE) {
         DWORD type = GetFileType(hErr);
@@ -292,13 +295,7 @@ static void WriteToStderr(const wchar_t* msg) {
             WriteTextToHandle(hConOut, msg);
             CloseHandle(hConOut);
         }
-        else {
-            OutputDebugStringW(msg);
-        }
         FreeConsole();
-    }
-    else {
-        OutputDebugStringW(msg);
     }
 }
 
@@ -342,6 +339,8 @@ static void ShowHelpAndExit() {
         L"  --font-path <路径>    从外部字体文件加载字体（支持 .ttf/.otf）\n"
         L"                        示例: --font-path \"C:\\Fonts\\CustomFont.ttf\"\n"
         L"                        可与 --font-name 组合使用以指定字体族名称\n"
+        L"  --debug [路径]        输出调试日志（默认 exe 同目录 TimeDisplay.log）\n"
+        L"                        路径可指定日志文件或目录；Release 下仅输出关键日志\n"
         L"===========================================================\n"
         L"\n【热键说明】（默认启用，可用 -k 禁用）\n"
         L"  F11                   切换全屏/窗口模式\n"
@@ -365,6 +364,7 @@ static void ShowHelpAndExit() {
         L"  TimeDisplay.exe -k -b                    # 禁用热键并隐藏按钮\n"
         L"  TimeDisplay.exe --font-name \"Microsoft YaHei\"  # 使用微软雅黑字体\n"
         L"  TimeDisplay.exe --font-path \"myfont.ttf\" --font-name \"MyFont\"  # 加载外部字体\n"
+        L"  TimeDisplay.exe --debug                  # 输出调试日志\n"
         L"===========================================================\n"
         L"\n【项目信息】\n"
         L"  开源地址：https://gitee.com/ygwill/time-viewer\n"
@@ -1049,6 +1049,24 @@ int WINAPI wWinMain(_In_ HINSTANCE hInstance,
     int argc;
     LPWSTR* argv = CommandLineToArgvW(GetCommandLineW(), &argc);
     if (argv) {
+        // 预扫描 --debug（可带日志路径）：尽早启用日志，让后续所有输出都能记录
+        for (int i = 1; i < argc; ++i) {
+            if (wcscmp(argv[i], L"--debug") == 0) {
+                const wchar_t* logPath = nullptr;
+                if (i + 1 < argc && argv[i + 1][0] != L'-') {
+                    logPath = argv[i + 1];
+                }
+                if (DebugLogEnable(logPath)) {
+                    LOGI(L"命令行: %s", GetCommandLineW());
+                    LOGI(L"启动环境: %s", g_launchEnv == LaunchEnv::Console ? L"控制台" :
+                        (g_launchEnv == LaunchEnv::Gui ? L"快捷方式/双击" : L"其它"));
+                }
+                else {
+                    ReportError(L"错误: 无法创建调试日志文件，日志功能不可用\n");
+                }
+                break;
+            }
+        }
         // 预扫描警告开关：保证它们位于错误参数之前或之后都能生效
         for (int i = 1; i < argc; ++i) {
             if (wcscmp(argv[i], L"--show-warning") == 0) {
@@ -1161,6 +1179,12 @@ int WINAPI wWinMain(_In_ HINSTANCE hInstance,
             else if (wcscmp(argv[i], L"--disable-touch") == 0) {
                 g_disableTouch = true;
             }
+            else if (wcscmp(argv[i], L"--debug") == 0) {
+                // 日志已在预扫描中启用，这里只消费可选的日志路径参数
+                if (i + 1 < argc && argv[i + 1][0] != L'-') {
+                    ++i;
+                }
+            }
             else {
                 // 无法识别的参数 → 报错并退出
                 wchar_t errMsg[384];
@@ -1172,6 +1196,11 @@ int WINAPI wWinMain(_In_ HINSTANCE hInstance,
         }
         LocalFree(argv);
     }
+
+    // 记录解析后的启动参数（详细日志仅 Debug 构建输出）
+    LOGV(L"参数: 透明度=%d, 隐藏按钮=%d, 全屏=%d, 置顶=%d, 禁用热键=%d, 强制GDI=%d, 自动隐藏=%d, 动画=%d, 触摸=%d",
+        g_transparency, g_hideButtons, g_startFullscreen, g_startTopmost, g_noHotKeys,
+        g_forceGDI, !g_noAutoHide, !g_noAnim, !g_disableTouch);
 
     // ===== 帮助或版本信息优先处理，不创建窗口 =====
     if (g_showVersion) {
@@ -1207,6 +1236,7 @@ int WINAPI wWinMain(_In_ HINSTANCE hInstance,
         if (!LoadFontFromPath(g_cmdFontPath)) {
             return 1; // LoadFontFromPath 内部已输出错误信息
         }
+        LOGI(L"字体: 已从文件加载 '%s'", g_cmdFontPath.c_str());
         // 如果用户未指定 --font-name，从文件名猜测字体族名称
         if (g_cmdFontName.empty()) {
             g_fontFamilyToUse = GuessFontNameFromPath(g_cmdFontPath);
@@ -1227,14 +1257,17 @@ int WINAPI wWinMain(_In_ HINSTANCE hInstance,
         auto pSetProcessDpiAwarenessContext = (BOOL(WINAPI*)(DPI_AWARENESS_CONTEXT))GetProcAddress(hUser32, "SetProcessDpiAwarenessContext");
         if (pSetProcessDpiAwarenessContext) {
             pSetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+            LOGV(L"DPI: Per-Monitor V2");
         } else {
             // Windows 7：没有 SetProcessDpiAwarenessContext，回退到系统级 DPI 感知
             SetProcessDPIAware();
+            LOGV(L"DPI: System Aware（Win7 回退）");
         }
         FreeLibrary(hUser32);
     }
     else {
         SetProcessDPIAware();
+        LOGV(L"DPI: System Aware（user32 加载失败回退）");
     }
 
     UNREFERENCED_PARAMETER(hPrevInstance);
@@ -1263,6 +1296,7 @@ int WINAPI wWinMain(_In_ HINSTANCE hInstance,
         DWORD err = GetLastError();
         wchar_t msg[256];
         StringCchPrintfW(msg, _countof(msg), L"窗口类注册失败！\n错误码: %lu\ncbSize: %u", err, wcex.cbSize);
+        LOGI(L"错误: 窗口类注册失败 (错误码 %lu)", err);
         MessageBoxW(nullptr, msg, L"错误", MB_ICONERROR);
         return 1;
     }
@@ -1296,9 +1330,11 @@ int WINAPI wWinMain(_In_ HINSTANCE hInstance,
         nullptr, nullptr, hInstance, nullptr);
 
     if (!hMainWindow) {
+        LOGI(L"错误: 主窗口创建失败 (错误码 %lu)", GetLastError());
         MessageBoxW(nullptr, L"主窗口创建失败！", L"错误", MB_ICONERROR);
         return 1;
     }
+    LOGV(L"主窗口已创建: %dx%d (DPI %u)", initWidth, initHeight, dpi);
 
     if (g_transparency < 255) {
         SetLayeredWindowAttributes(hMainWindow, 0, (BYTE)g_transparency, LWA_ALPHA);
@@ -1314,25 +1350,23 @@ int WINAPI wWinMain(_In_ HINSTANCE hInstance,
 
     // 注册触摸窗口（Win7+ 支持），失败不阻塞启动
     if (!RegisterTouchWindow(hMainWindow, TWF_FINETOUCH)) {
-        OutputDebugStringW(L"触摸注册失败（当前系统不支持触摸）\n");
+        LOGV(L"触摸注册失败（当前系统不支持触摸）");
     }
 
     if (!InitializeNTPClient()) {
-        OutputDebugStringW(L"NTP客户端初始化失败\n");
+        LOGI(L"错误: NTP 客户端初始化失败");
     }
 
     // 加载嵌入字体（当未通过命令行指定字体时）
     if (g_fontFamilyToUse.empty()) {
         g_useEmbeddedFont = LoadEmbeddedFont();
         if (g_useEmbeddedFont) {
-            OutputDebugStringW(L"嵌入字体加载成功: Source Han Sans Regular\n");
+            LOGI(L"字体: 嵌入字体加载成功 (Source Han Sans Regular)");
         } else {
-            OutputDebugStringW(L"嵌入字体加载失败，将使用 Segoe UI 回退\n");
+            LOGI(L"字体: 嵌入字体加载失败，回退 Segoe UI");
         }
     } else {
-        wchar_t logMsg[256];
-        StringCchPrintfW(logMsg, _countof(logMsg), L"使用命令行指定字体: %s\n", g_fontFamilyToUse.c_str());
-        OutputDebugStringW(logMsg);
+        LOGI(L"字体: 使用命令行指定字体 '%s'", g_fontFamilyToUse.c_str());
     }
 
     CreateDynamicFonts(hMainWindow);
@@ -1341,9 +1375,9 @@ int WINAPI wWinMain(_In_ HINSTANCE hInstance,
     // 在窗口可见前初始化 D2D（避免首帧走 GDI 导致按钮闪烁）
     // 如果指定了 --force-gdi / --disable-gpu，则跳过 D2D 初始化，强制使用 GDI 渲染
     if (g_forceGDI) {
-        OutputDebugStringW(L"命令行指定 --force-gdi，跳过 D2D 初始化，强制使用 GDI 渲染\n");
+        LOGI(L"渲染: 命令行指定 --force-gdi，强制使用 GDI");
     } else if (!D2DRenderer_Init(hMainWindow)) {
-        OutputDebugStringW(L"Direct2D GPU 渲染器初始化失败，将使用 GDI 软渲染回退\n");
+        LOGI(L"渲染: D2D 初始化失败，回退 GDI（详见上方 D2D 日志）");
     }
 
     if (g_startTopmost) {
@@ -1370,6 +1404,8 @@ int WINAPI wWinMain(_In_ HINSTANCE hInstance,
         DispatchMessageW(&msg);
     }
 
+    LOGI(L"主循环退出，开始清理资源");
+
     if (hLargeFont) DeleteObject(hLargeFont);
     if (hDateFont) DeleteObject(hDateFont);
     if (hNormalFont) DeleteObject(hNormalFont);
@@ -1389,6 +1425,7 @@ int WINAPI wWinMain(_In_ HINSTANCE hInstance,
     CleanupFullscreenModule();
     D2DRenderer_Cleanup();
 
+    LOGI(L"退出: 退出码=%d", (int)msg.wParam);
     return (int)msg.wParam;
 }
 

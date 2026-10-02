@@ -67,6 +67,7 @@ msbuild TimeDisplay.sln /p:Configuration=Release /p:Platform=x64
 | `-t`, `--transparency <0-255>` | 设置窗口透明度（0=完全透明，255=不透明） |
 | `--font-name <名称>` | 指定显示字体（系统中已安装的字体族名称） |
 | `--font-path <路径>` | 从外部字体文件加载字体（支持 .ttf/.otf） |
+| `--debug [路径]` | 输出调试日志（默认 exe 同目录 `TimeDisplay.log`，可指定文件或目录） |
 | `-h`, `--help` | 显示帮助信息 |
 | `-v`, `--version` | 显示版本信息 |
 
@@ -79,6 +80,7 @@ TimeDisplay.exe --no-button --transparency 200  # 无按钮半透明
 TimeDisplay.exe -k -b                    # 禁用热键并隐藏按钮
 TimeDisplay.exe --font-name "Microsoft YaHei"   # 使用微软雅黑字体
 TimeDisplay.exe --font-path "myfont.ttf" --font-name "MyFont"  # 加载外部字体
+TimeDisplay.exe --debug                      # 输出调试日志
 ```
 
 ## 项目结构
@@ -87,7 +89,7 @@ TimeDisplay.exe --font-path "myfont.ttf" --font-name "MyFont"  # 加载外部字
 ├── main.cpp                 # 主程序逻辑，窗口创建、时间显示、事件处理
 ├── d2d_renderer.cpp/h       # Direct2D/DirectWrite 渲染器（硬件加速 + 软件回退）
 ├── fullscreen.cpp/h         # 全屏模式管理
-├── help.cpp/h               # 帮助信息与版本信息显示模块
+├── debug_log.cpp/h          # 调试日志模块（--debug）
 ├── ntp_client.cpp/h         # NTP 客户端实现，用于网络时间同步
 ├── app.rc / resource.h      # 资源文件（图标、嵌入字体等）
 ├── app.manifest             # 应用程序清单（DPI 感知等）

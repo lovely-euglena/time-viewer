@@ -351,12 +351,14 @@
     <ClCompile Include="fullscreen.cpp" />
     <ClCompile Include="ntp_client.cpp" />
     <ClCompile Include="d2d_renderer.cpp" />
+    <ClCompile Include="debug_log.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="d2d_renderer.h" />
     <ClInclude Include="fullscreen.h" />
     <ClInclude Include="ntp_client.h" />
     <ClInclude Include="resource.h" />
+    <ClInclude Include="debug_log.h" />
   </ItemGroup>
   <ItemGroup>
     <!-- x86 专用：Win7 下 STL 的 GetSystemTimePreciseAsFileTime 导入垫片（x64 由 C++ 提供） -->

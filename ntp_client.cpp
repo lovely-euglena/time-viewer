@@ -21,6 +21,7 @@
 #pragma comment(lib, "ws2_32.lib")
 
 #include "ntp_client.h"
+#include "debug_log.h"
 
 // 前向声明
 class NTPClient;
@@ -377,17 +378,24 @@ public:
 #ifdef _DEBUG
                     std::wcout << L"成功从 " << host << L" 获取网络时间: " << network_time << std::endl;
 #endif
+                    LOGI(L"NTP: 从 %s 同步成功", host.c_str());
                     break;
                 }
-                else if (retry < MAX_RETRY_COUNT - 1) {
-                    if (m_cancelFlag.load()) {
-                        break;
+                else {
+                    LOGV(L"NTP: %s 同步失败 (错误码 %d)", host.c_str(), result);
+                    if (retry < MAX_RETRY_COUNT - 1) {
+                        if (m_cancelFlag.load()) {
+                            break;
+                        }
+                        ApplyBackoffDelay(retry);
                     }
-                    ApplyBackoffDelay(retry);
                 }
             }
         }
 
+        if (success_count == 0 && !m_cancelFlag.load()) {
+            LOGI(L"NTP: 同步失败（所有服务器均不可用）");
+        }
         return success_count > 0;
     }
 

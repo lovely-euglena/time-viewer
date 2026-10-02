@@ -64,6 +64,7 @@ msbuild TimeDisplay.sln /p:Configuration=Release /p:Platform=x64
 | `-t`, `--transparency <0-255>` | Set window transparency (0=fully transparent, 255=opaque) |
 | `--font-name <name>` | Specify display font (name of an installed system font family) |
 | `--font-path <path>` | Load font from an external file (supports .ttf/.otf) |
+| `--debug [path]` | Output debug log (defaults to `TimeDisplay.log` next to the exe; file or directory) |
 | `-h`, `--help` | Show help information |
 | `-v`, `--version` | Show version information |
 
@@ -76,6 +77,7 @@ TimeDisplay.exe --no-button --transparency 200    # No buttons, semi-transparent
 TimeDisplay.exe -k -b                             # Disable hotkeys, hide buttons
 TimeDisplay.exe --font-name "Microsoft YaHei"     # Use Microsoft YaHei font
 TimeDisplay.exe --font-path "myfont.ttf" --font-name "MyFont"  # Load external font
+TimeDisplay.exe --debug                           # Output debug log
 ```
 
 ## Project Structure
@@ -84,7 +86,7 @@ TimeDisplay.exe --font-path "myfont.ttf" --font-name "MyFont"  # Load external f
 ├── main.cpp                 # Main program logic — window creation, time display, event handling
 ├── d2d_renderer.cpp/h       # Direct2D/DirectWrite renderer (hardware accelerated + software fallback)
 ├── fullscreen.cpp/h         # Full-screen mode management
-├── help.cpp/h               # Help info and version info display module
+├── debug_log.cpp/h          # Debug log module (--debug)
 ├── ntp_client.cpp/h         # NTP client implementation for network time synchronization
 ├── app.rc / resource.h      # Resources (icons, embedded fonts, etc.)
 ├── app.manifest             # Application manifest (DPI awareness, etc.)

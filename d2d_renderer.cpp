@@ -3,6 +3,7 @@
 // 当 D2D 初始化失败时 IsAvailable 返回 false，调用方应回退到 GDI
 
 #include "d2d_renderer.h"
+#include "debug_log.h"
 
 #include <d2d1.h>
 #include <dwrite.h>
@@ -38,6 +39,15 @@ namespace {
         if (g_hDWriteLib && !g_pfnDWriteCreateFactory) {
             g_pfnDWriteCreateFactory = reinterpret_cast<decltype(g_pfnDWriteCreateFactory)>(
                 GetProcAddress(g_hDWriteLib, "DWriteCreateFactory"));
+        }
+        // 记录缺失原因，便于在 Win7 等旧系统上定位回退原因
+        if (!g_pfnD2D1CreateFactory) {
+            LOGI(g_hD2D1Lib ? L"D2D: d2d1.dll 缺少 D2D1CreateFactory 导出"
+                            : L"D2D: d2d1.dll 加载失败（系统未安装或版本过低）");
+        }
+        if (!g_pfnDWriteCreateFactory) {
+            LOGI(g_hDWriteLib ? L"D2D: dwrite.dll 缺少 DWriteCreateFactory 导出"
+                              : L"D2D: dwrite.dll 加载失败（系统未安装或版本过低）");
         }
         return g_pfnD2D1CreateFactory != nullptr && g_pfnDWriteCreateFactory != nullptr;
     }
@@ -144,7 +154,10 @@ bool D2DRenderer_Init(HWND hWnd) {
         __uuidof(ID2D1Factory),
         nullptr,
         (void**)&g_d2dFactory);
-    if (FAILED(hr) || !g_d2dFactory) return false;
+    if (FAILED(hr) || !g_d2dFactory) {
+        LOGI(L"D2D: D2D1CreateFactory 失败 (HRESULT=0x%08X)", (unsigned)hr);
+        return false;
+    }
 
     IUnknown* dwriteTemp = nullptr;
     hr = g_pfnDWriteCreateFactory(
@@ -152,6 +165,7 @@ bool D2DRenderer_Init(HWND hWnd) {
         __uuidof(IDWriteFactory),
         &dwriteTemp);
     if (FAILED(hr) || !dwriteTemp) {
+        LOGI(L"D2D: DWriteCreateFactory 失败 (HRESULT=0x%08X)", (unsigned)hr);
         SafeRelease(g_d2dFactory);
         return false;
     }
@@ -184,6 +198,7 @@ bool D2DRenderer_Init(HWND hWnd) {
 
     // 硬件加速失败 → 自动回退到软件渲染
     if ((FAILED(hr) || !g_renderTarget) && !g_softwareMode) {
+        HRESULT hwHr = hr;
         rtProps.type = D2D1_RENDER_TARGET_TYPE_SOFTWARE;
         hr = g_d2dFactory->CreateHwndRenderTarget(
             rtProps,
@@ -191,11 +206,12 @@ bool D2DRenderer_Init(HWND hWnd) {
             &g_renderTarget);
         if (SUCCEEDED(hr) && g_renderTarget) {
             g_softwareMode = true;
-            OutputDebugStringW(L"D2D: 已回退到软件渲染模式\n");
+            LOGI(L"D2D: 硬件渲染不可用 (HRESULT=0x%08X)，已回退软件渲染", (unsigned)hwHr);
         }
     }
 
     if (FAILED(hr) || !g_renderTarget) {
+        LOGI(L"D2D: 渲染目标创建失败 (HRESULT=0x%08X)", (unsigned)hr);
         SafeRelease(g_dwriteFactory);
         SafeRelease(g_d2dFactory);
         return false;
@@ -215,10 +231,12 @@ bool D2DRenderer_Init(HWND hWnd) {
         !makeBrush(D2D1::ColorF(200 / 255.0f, 200 / 255.0f, 240 / 255.0f), g_brushDate) ||
         !makeBrush(D2D1::ColorF(180 / 255.0f, 180 / 255.0f, 220 / 255.0f), g_brushWeek) ||
         !makeBrush(D2D1::ColorF(140 / 255.0f, 140 / 255.0f, 160 / 255.0f), g_brushSource)) {
+        LOGI(L"D2D: 颜色刷创建失败");
         D2DRenderer_Cleanup();
         return false;
     }
 
+    LOGI(L"D2D: 初始化成功 (%s)", g_softwareMode ? L"软件渲染" : L"硬件加速");
     g_initialized = true;
     return true;
 }
