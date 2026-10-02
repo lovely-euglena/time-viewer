@@ -347,14 +347,6 @@
     </Manifest>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <ClCompile Include="help.cpp">
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">false</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">false</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">false</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release-Full|Win32'">false</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|x64'">false</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release-Full|x64'">false</ExcludedFromBuild>
-    </ClCompile>
     <ClCompile Include="main.cpp" />
     <ClCompile Include="fullscreen.cpp" />
     <ClCompile Include="ntp_client.cpp" />
@@ -363,7 +355,6 @@
   <ItemGroup>
     <ClInclude Include="d2d_renderer.h" />
     <ClInclude Include="fullscreen.h" />
-    <ClInclude Include="help.h" />
     <ClInclude Include="ntp_client.h" />
     <ClInclude Include="resource.h" />
   </ItemGroup>
