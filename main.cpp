@@ -430,8 +430,9 @@ int GetDisplayTime(SYSTEMTIME& st) {
 std::wstring GetTimeSourceString() {
     // 保留原有图标：🌐 网络时间 / 💻 本地时间
     std::wstring text = g_hasNetworkTime ? L"🌐 网络时间" : L"💻 本地时间";
-    // 同步进行中时在来源文字后追加“同步中”
-    if (g_syncing) text += L" 同步中";
+    // 仅当按钮栏未显示（已自动隐藏或 --no-button）时，
+    // 才在来源文字后追加“同步中”；按钮可见时由“同步”按钮文本体现同步状态
+    if (g_syncing && (g_hideButtons || !g_buttonsVisible)) text += L" 同步中";
     return text;
 }
 
@@ -764,6 +765,7 @@ void ShowButtons(HWND hWnd) {
             }
         }
         g_buttonsVisible = true;
+        InvalidateRect(hWnd, NULL, FALSE); // 按钮已显示，立即移除左上角“同步中”
     }
 }
 
@@ -781,6 +783,7 @@ void HideButtons(HWND hWnd) {
             }
         }
         g_buttonsVisible = false;
+        InvalidateRect(hWnd, NULL, FALSE); // 按钮已隐藏，若同步中则立即在左上角显示“同步中”
     }
 }
 
