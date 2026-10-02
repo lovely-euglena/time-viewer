@@ -428,8 +428,11 @@ int GetDisplayTime(SYSTEMTIME& st) {
 }
 
 std::wstring GetTimeSourceString() {
-    if (g_hasNetworkTime) return L"🌐 网络时间";
-    return L"💻 本地时间";
+    // 保留原有图标：🌐 网络时间 / 💻 本地时间
+    std::wstring text = g_hasNetworkTime ? L"🌐 网络时间" : L"💻 本地时间";
+    // 同步进行中时在来源文字后追加“同步中”
+    if (g_syncing) text += L" 同步中";
+    return text;
 }
 
 std::wstring GetTimeDateStringEx() {
@@ -658,9 +661,10 @@ void HandleTouchInput(HWND hWnd, WPARAM wParam, LPARAM lParam) {
 void StartSync(HWND hWnd) {
     if (g_syncing) return;
     g_syncing = true;
-    if (!g_hideButtons) {
-        ShowButtons(hWnd);
-    }
+    // 同步时不再强制弹出按钮栏：按钮已隐藏时保持隐藏，
+    // 避免自动同步（每小时）把按钮栏唤出。
+    // 左上角时间来源文字后追加“同步中”，立即重绘使其可见。
+    InvalidateRect(hWnd, NULL, FALSE);
     if (hSyncBtn) SetWindowTextW(hSyncBtn, L"同步中...");
     ResetCancel();
     if (g_syncThread.joinable()) {
@@ -1609,24 +1613,30 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) 
     }
 
     case WM_NTP_SYNC_FINISHED: {
+        bool syncOk = false;
         if (wParam == 1) {
             SYSTEMTIME ntpHour;
             if (GetLastNetworkTime(&ntpHour)) {
                 g_networkTime = ntpHour;
                 g_hasNetworkTime = true;
-                if (hSyncBtn) SetWindowTextW(hSyncBtn, L"同步成功");
-                InvalidateRect(hWnd, NULL, FALSE);
                 g_syncBaseTick = GetTickCount64();
+                syncOk = true;
             }
-            else {
-                if (hSyncBtn) SetWindowTextW(hSyncBtn, L"同步失败");
-            }
+        }
+        if (syncOk) {
+            // 成功：继续显示“网络时间”，并去掉“同步中”
+            if (hSyncBtn) SetWindowTextW(hSyncBtn, L"同步成功");
         }
         else {
+            // 失败：时间来源回退为“本地时间”，并去掉“同步中”
+            g_hasNetworkTime = false;
+            g_syncBaseTick = 0;
             if (hSyncBtn) SetWindowTextW(hSyncBtn, L"同步失败");
         }
-        if (hSyncBtn) EnableWindow(hSyncBtn, TRUE);
         g_syncing = false;
+        // 立即刷新左上角来源文字（网络时间 / 本地时间）
+        InvalidateRect(hWnd, NULL, FALSE);
+        if (hSyncBtn) EnableWindow(hSyncBtn, TRUE);
         ResetInterActionTimer();
         SetTimer(hWnd, 2, 3000, NULL);
         break;
