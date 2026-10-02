@@ -113,7 +113,7 @@ The renderer uses a **hardware accelerated + automatic fallback** strategy:
 |----------|----------|
 | Windows 10/11 (with GPU) | D2D hardware accelerated rendering |
 | Windows 10/11 (no GPU / Remote Desktop) | Auto fallback to D2D software rendering (WARP) or GDI |
-| Windows 7 + KB971644 | D2D hardware accelerated rendering |
+| Windows 7 + KB2670838 | D2D hardware accelerated rendering |
 | Windows 7 without Platform Update | D2D unavailable → automatic GDI fallback |
 | Any platform GPU driver crash | `D2DERR_RECREATE_TARGET` auto-rebuilds resources |
 

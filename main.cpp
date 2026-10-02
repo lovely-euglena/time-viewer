@@ -315,7 +315,7 @@ static void ShowHelpAndExit() {
         L"\n\n\n===========================================================\n"
         L"TimeDisplay 时间显示器\n"
         L"Windows 11 风格网络时间同步工具\n"
-        L"访问 https://gitee.com/ygwill/time-viwer/releases/ 获取更新\n"
+        L"访问 https://gitee.com/ygwill/time-viewer/releases/ 获取更新\n"
         L"===========================================================\n"
         L"\n使用方法:\n"
         L"  TimeDisplay.exe [选项]\n"

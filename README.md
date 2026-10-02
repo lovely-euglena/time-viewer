@@ -116,7 +116,7 @@ TimeDisplay.exe --debug                      # 输出调试日志
 |------|------|
 | Windows 10/11（有 GPU） | D2D 硬件加速渲染 |
 | Windows 10/11（无 GPU / 远程桌面） | 自动回退到 D2D 软件渲染（WARP）或 GDI |
-| Windows 7 + KB971644 | D2D 硬件加速渲染 |
+| Windows 7 + KB2670838 | D2D 硬件加速渲染 |
 | Windows 7 无平台更新 | D2D 不可用 → 自动走 GDI 回退 |
 | 任意平台 GPU 驱动崩溃 | `D2DERR_RECREATE_TARGET` 自动重建资源 |
 
