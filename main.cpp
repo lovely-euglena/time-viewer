@@ -175,7 +175,9 @@ bool g_noAnim = false;         // --no-animation：禁用按钮显示/隐藏动�
 bool g_disableTouch = false;   // --disable-touch：禁用双击/触摸双击切换全屏
 bool g_showWarning = false;    // --show-warning：强制显示参数警告弹窗
 bool g_ignoreWarning = false;  // --ignore-warning / -w：忽略快捷方式启动参数警告
-bool g_isGuiLaunch = false;    // 是否为 GUI 环境启动（无父控制台，快捷方式/双击）
+// 启动环境：决定错误信息的报告方式（控制台 / 双击快捷方式 / 其它无法判定的环境）
+enum class LaunchEnv { Console, Gui, Other };
+LaunchEnv g_launchEnv = LaunchEnv::Other;
 // ===== 命令行字体参数 =====
 std::wstring g_cmdFontName;           // --font-name 参数指定的字体族名称
 std::wstring g_cmdFontPath;           // --font-path 参数指定的字体文件路径
@@ -259,6 +261,43 @@ static void PrintToConsole(const wchar_t* msg) {
     }
     else {
         // 最后备选：使用 OutputDebugString
+        OutputDebugStringW(msg);
+    }
+}
+
+// 将消息输出到标准错误（stderr），绝不新建控制台窗口：
+// - stderr 已重定向到文件/管道：直接写入；
+// - 控制台启动：临时附加父控制台后输出（附加完即分离）；
+// - 双击/快捷方式等无控制台环境：仅 OutputDebugString。
+static void WriteToStderr(const wchar_t* msg) {
+    HANDLE hErr = GetStdHandle(STD_ERROR_HANDLE);
+    if (hErr && hErr != INVALID_HANDLE_VALUE) {
+        DWORD type = GetFileType(hErr);
+        if (type == FILE_TYPE_DISK || type == FILE_TYPE_PIPE) {
+            WriteTextToHandle(hErr, msg);
+            return;
+        }
+        DWORD mode = 0;
+        if (GetConsoleMode(hErr, &mode)) {
+            WriteTextToHandle(hErr, msg);
+            return;
+        }
+    }
+
+    // 无可用 stderr：尝试附加父控制台（只附加、不新建）
+    if (AttachConsole(ATTACH_PARENT_PROCESS)) {
+        HANDLE hConOut = CreateFileW(L"CONOUT$", GENERIC_WRITE, FILE_SHARE_WRITE,
+            nullptr, OPEN_EXISTING, 0, nullptr);
+        if (hConOut != INVALID_HANDLE_VALUE) {
+            WriteTextToHandle(hConOut, msg);
+            CloseHandle(hConOut);
+        }
+        else {
+            OutputDebugStringW(msg);
+        }
+        FreeConsole();
+    }
+    else {
         OutputDebugStringW(msg);
     }
 }
@@ -956,12 +995,23 @@ static bool LoadEmbeddedFont() {
     return true;
 }
 
-// 报告参数错误：始终输出到控制台（cmd/powershell 可见），
-// 同时在 GUI 启动环境（快捷方式/双击，用户看不到控制台）下弹窗显示。
-// 命令行下可用 --show-warning 强制弹窗，--ignore-warning/-w 抑制弹窗。
+// 参数错误/警告的弹窗策略：
+// - 控制台启动：仅 --show-warning 时弹窗；
+// - 双击/快捷方式启动：默认弹窗（-w/--ignore-warning 抑制）；
+// - 其它环境（无法判定来源）：一律弹窗。
+static bool ShouldShowDialog() {
+    return g_showWarning
+        || (g_launchEnv == LaunchEnv::Gui && !g_ignoreWarning)
+        || g_launchEnv == LaunchEnv::Other;
+}
+
+// 报告参数错误：
+// - 控制台启动：输出到标准错误（不弹窗，--show-warning 可强制弹窗）；
+// - 双击/快捷方式启动：弹窗（-w 可抑制），不再先弹出控制台窗口；
+// - 其它启动环境：标准错误 + 弹窗。
 static void ReportError(const wchar_t* msg) {
-    PrintToConsole(msg);
-    if (g_showWarning || (g_isGuiLaunch && !g_ignoreWarning)) {
+    WriteToStderr(msg);
+    if (ShouldShowDialog()) {
         MessageBoxW(nullptr, msg, L"TimeDisplay - 参数错误", MB_OK | MB_ICONERROR);
     }
 }
@@ -971,15 +1021,29 @@ int WINAPI wWinMain(_In_ HINSTANCE hInstance,
     _In_ LPWSTR lpCmdLine,
     _In_ int nCmdShow) {
 
-    // 检测是否有父控制台，判断是否为 GUI 环境启动（快捷方式/双击）
-    // 命令行（cmd/powershell）启动时存在父控制台，GUI 双击/快捷方式启动则无
+    // 检测启动环境：
+    // - 有父控制台 → 命令行（cmd/powershell）启动；
+    // - 无父控制台 → 快捷方式/双击等 GUI 启动；
+    // - 其它失败原因 → 无法判定来源的其它环境。
     if (AttachConsole(ATTACH_PARENT_PROCESS)) {
         // 有父控制台，来自命令行
         FreeConsole();
-        g_isGuiLaunch = false;
-    } else if (GetLastError() == ERROR_INVALID_HANDLE) {
-        // 无父控制台，可能来自快捷方式或直接双击
-        g_isGuiLaunch = true;
+        g_launchEnv = LaunchEnv::Console;
+    }
+    else {
+        DWORD attachErr = GetLastError();
+        if (attachErr == ERROR_INVALID_HANDLE) {
+            // 无父控制台，可能来自快捷方式或直接双击
+            g_launchEnv = LaunchEnv::Gui;
+        }
+        else if (attachErr == ERROR_ACCESS_DENIED) {
+            // 已附加到某个控制台（被其它程序调起并预先附加）
+            g_launchEnv = LaunchEnv::Console;
+        }
+        else {
+            // 其它环境：无法判定来源
+            g_launchEnv = LaunchEnv::Other;
+        }
     }
 
     int argc;
@@ -1038,8 +1102,14 @@ int WINAPI wWinMain(_In_ HINSTANCE hInstance,
                     return 1;
                 }
                 if (val == 0) {
-                    PrintToConsole(L"警告: 透明度设置为 0，窗口将完全不可见。\n");
-                    PrintToConsole(L"提示: 若确实需要此设置，请确认这是您的预期行为。\n");
+                    static const wchar_t warnMsg[] =
+                        L"警告: 透明度设置为 0，窗口将完全不可见。\n"
+                        L"提示: 若确实需要此设置，请确认这是您的预期行为。\n";
+                    WriteToStderr(warnMsg);
+                    if (ShouldShowDialog()) {
+                        MessageBoxW(nullptr, warnMsg, L"TimeDisplay - 参数警告",
+                            MB_OK | MB_ICONWARNING);
+                    }
                 }
                 g_transparency = val;
             }
@@ -1142,7 +1212,7 @@ int WINAPI wWinMain(_In_ HINSTANCE hInstance,
             g_fontFamilyToUse = GuessFontNameFromPath(g_cmdFontPath);
             wchar_t logMsg[512];
             StringCchPrintfW(logMsg, _countof(logMsg), L"从文件名推断字体族名称: %s\n", g_fontFamilyToUse.c_str());
-            PrintToConsole(logMsg);
+            WriteToStderr(logMsg);
         } else {
             g_fontFamilyToUse = g_cmdFontName;
         }
