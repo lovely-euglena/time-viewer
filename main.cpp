@@ -63,6 +63,37 @@ typedef struct DPI_AWARENESS_CONTEXT__ *DPI_AWARENESS_CONTEXT;
 #pragma comment(lib, "dwmapi.lib")
 #pragma comment(lib, "comctl32.lib")
 
+// ===== Windows 7 兼容：STL 的 GetSystemTimePreciseAsFileTime 垫片 =====
+// VS2026 (v145) 的 STL 中，std::thread/std::mutex 等会间接引用
+// GetSystemTimePreciseAsFileTime（Windows 8+ 才提供的 API）。若走静态导入，Win7 上
+// 进程启动时会报“无法定位程序输入点”。这里提供本地回退实现：
+// 系统存在该 API 时动态调用，否则回退到 GetSystemTimeAsFileTime。
+// x64：直接在下方为导入符号 __imp_... 提供定义；
+// x86：导入符号带 "@4" 修饰，纯 C++ 无法定义，由 win7_stl_compat_x86.asm 引用本函数。
+extern "C" void WINAPI TimeDisplay_FallbackGetSystemTimePreciseAsFileTime(LPFILETIME ft) {
+    typedef void (WINAPI* PFN_GET_PRECISE_TIME)(LPFILETIME);
+    static PFN_GET_PRECISE_TIME s_pfn = nullptr;
+    static bool s_resolved = false;
+    if (!s_resolved) {
+        HMODULE hKernel32 = GetModuleHandleW(L"kernel32.dll");
+        if (hKernel32) {
+            s_pfn = reinterpret_cast<PFN_GET_PRECISE_TIME>(
+                GetProcAddress(hKernel32, "GetSystemTimePreciseAsFileTime"));
+        }
+        s_resolved = true;
+    }
+    if (s_pfn) {
+        s_pfn(ft);
+    } else {
+        ::GetSystemTimeAsFileTime(ft);
+    }
+}
+
+#ifdef _M_X64
+extern "C" void (WINAPI* const __imp_GetSystemTimePreciseAsFileTime)(LPFILETIME) =
+    &TimeDisplay_FallbackGetSystemTimePreciseAsFileTime;
+#endif // _M_X64
+
 // 按钮ID定义
 #define ID_FULLSCREEN_BTN  1001
 #define ID_EXIT_BTN        1002
@@ -1087,6 +1118,9 @@ int WINAPI wWinMain(_In_ HINSTANCE hInstance,
         auto pSetProcessDpiAwarenessContext = (BOOL(WINAPI*)(DPI_AWARENESS_CONTEXT))GetProcAddress(hUser32, "SetProcessDpiAwarenessContext");
         if (pSetProcessDpiAwarenessContext) {
             pSetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+        } else {
+            // Windows 7：没有 SetProcessDpiAwarenessContext，回退到系统级 DPI 感知
+            SetProcessDPIAware();
         }
         FreeLibrary(hUser32);
     }
