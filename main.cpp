@@ -220,6 +220,30 @@ std::wstring GetTimeSourceString();
 
 // ==================== 新增：帮助系统函数 ====================
 
+// 将文本写入指定句柄。
+// 控制台句柄用 WriteConsoleW 输出 Unicode；
+// 管道/文件等重定向场景下 WriteConsoleW 会失败，此时按控制台/系统代码页
+// 转换为多字节后用 WriteFile 输出，保证重定向到文件时内容不丢失。
+static void WriteTextToHandle(HANDLE hOut, const wchar_t* msg) {
+    if (!hOut || hOut == INVALID_HANDLE_VALUE || !msg) return;
+
+    DWORD mode = 0;
+    if (GetConsoleMode(hOut, &mode)) {
+        DWORD written = 0;
+        WriteConsoleW(hOut, msg, (DWORD)wcslen(msg), &written, nullptr);
+        return;
+    }
+
+    UINT cp = GetConsoleOutputCP();
+    if (cp == 0) cp = GetACP();
+    int bytes = WideCharToMultiByte(cp, 0, msg, -1, nullptr, 0, nullptr, nullptr);
+    if (bytes <= 1) return; // 转换失败或空字符串
+    std::string buf((size_t)(bytes - 1), '\0');
+    WideCharToMultiByte(cp, 0, msg, -1, &buf[0], bytes, nullptr, nullptr);
+    DWORD written = 0;
+    WriteFile(hOut, buf.data(), (DWORD)buf.size(), &written, nullptr);
+}
+
 // 将消息输出到控制台（支持分配/附加父控制台）
 static void PrintToConsole(const wchar_t* msg) {
     HANDLE hCon = GetStdHandle(STD_OUTPUT_HANDLE);
@@ -231,8 +255,7 @@ static void PrintToConsole(const wchar_t* msg) {
         hCon = GetStdHandle(STD_OUTPUT_HANDLE);
     }
     if (hCon && hCon != INVALID_HANDLE_VALUE) {
-        DWORD written = 0;
-        WriteConsoleW(hCon, msg, (DWORD)wcslen(msg), &written, nullptr);
+        WriteTextToHandle(hCon, msg);
     }
     else {
         // 最后备选：使用 OutputDebugString
@@ -322,6 +345,13 @@ static void ShowHelpAndExit() {
     // 无法获取控制台句柄时退回到 OutputDebugString
     if (!hCon || hCon == INVALID_HANDLE_VALUE) {
         OutputDebugStringW(helpMsg);
+        exit(0);
+    }
+
+    // 输出被重定向到文件/管道时无法分页：一次性输出全部内容后退出
+    DWORD conMode = 0;
+    if (!GetConsoleMode(hCon, &conMode)) {
+        WriteTextToHandle(hCon, helpMsg);
         exit(0);
     }
 
@@ -955,6 +985,15 @@ int WINAPI wWinMain(_In_ HINSTANCE hInstance,
     int argc;
     LPWSTR* argv = CommandLineToArgvW(GetCommandLineW(), &argc);
     if (argv) {
+        // 预扫描警告开关：保证它们位于错误参数之前或之后都能生效
+        for (int i = 1; i < argc; ++i) {
+            if (wcscmp(argv[i], L"--show-warning") == 0) {
+                g_showWarning = true;
+            }
+            else if (wcscmp(argv[i], L"--ignore-warning") == 0 || wcscmp(argv[i], L"-w") == 0) {
+                g_ignoreWarning = true;
+            }
+        }
         for (int i = 1; i < argc; ++i) {
             if (wcscmp(argv[i], L"--no-button") == 0 || wcscmp(argv[i], L"-b") == 0) {
                 g_hideButtons = true;
