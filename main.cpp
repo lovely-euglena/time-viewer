@@ -1378,10 +1378,18 @@ int WINAPI wWinMain(_In_ HINSTANCE hInstance,
 
     // 在窗口可见前初始化 D2D（避免首帧走 GDI 导致按钮闪烁）
     // 如果指定了 --force-gdi / --disable-gpu，则跳过 D2D 初始化，强制使用 GDI 渲染
+    bool layeredWindow = (GetWindowLongW(hMainWindow, GWL_EXSTYLE) & WS_EX_LAYERED) != 0;
     if (g_forceGDI) {
         LOGI(L"渲染: 命令行指定 --force-gdi，强制使用 GDI");
+    } else if (layeredWindow) {
+        // 分层窗口（透明度 < 255）为“系统重定向合成”，D2D HwndRenderTarget 经 DXGI
+        // 呈现与 WS_EX_LAYERED 不兼容（参见 MSDN《Layered Windows with Direct2D》）；
+        // 强制使用 GDI 双缓冲，避免透明模式下的异常与闪烁。
+        LOGI(L"渲染: 检测到分层窗口（透明度模式），强制使用 GDI");
     } else if (!D2DRenderer_Init(hMainWindow)) {
         LOGI(L"渲染: D2D 初始化失败，回退 GDI（详见上方 D2D 日志）");
+    } else {
+        LOGI(L"渲染: 使用 D2D 渲染");
     }
 
     if (g_startTopmost) {
