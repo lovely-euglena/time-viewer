@@ -111,6 +111,9 @@ namespace {
 
     bool g_initialized = false;
     bool g_softwareMode = false;
+    // Present 连续失败熔断：避免持续性 Present 失败导致每帧重建设备（设备创建风暴）
+    bool g_flipModelBlocked = false;
+    int  g_consecutivePresentFailures = 0;
 
     // 格式缓存验证参数（上一次创建时的值）
     int    g_cacheTimeSize   = 0;
@@ -460,7 +463,7 @@ bool D2DRenderer_Init(HWND hWnd) {
 
     bool inited = false;
 
-    if (!g_softwareMode && !layered) {
+    if (!g_softwareMode && !layered && !g_flipModelBlocked) {
         if (InitFlipModelPath(hWnd, w, h, dpi)) {
             inited = CreateBrushes();
             if (inited) {
@@ -681,9 +684,23 @@ namespace {
         if (g_useDeviceContext && g_swapChain) {
             HRESULT hrPresent = g_swapChain->Present(1, 0);
             if (FAILED(hrPresent)) {
-                LOGV(L"D2D: Present 失败 (0x%08X)，标记重建设备", (unsigned)hrPresent);
-                // 任何 Present 失败都重建设备：flip-model 交换链仍持有窗口呈现，
-                // 若静默回退 GDI，GDI 画面可能被交换链内容覆盖而不可见。
+                ++g_consecutivePresentFailures;
+                LOGV(L"D2D: Present 失败 (0x%08X)，连续 %d 次",
+                    (unsigned)hrPresent, g_consecutivePresentFailures);
+
+                if (g_consecutivePresentFailures >= 3) {
+                    // 持续性失败（非一次性设备丢失）：熔断 flip-model，回退 HWND RT/GDI，
+                    // 避免每帧重建设备造成设备创建风暴。
+                    g_flipModelBlocked = true;
+                    LOGI(L"D2D: Present 连续失败 %d 次，本次运行禁用 flip-model，回退 HWND RT/GDI",
+                        g_consecutivePresentFailures);
+                    ReleaseDeviceResources();
+                    D2DRenderer_Init(hWnd);
+                    return false;
+                }
+
+                // 单次失败：重建设备并重绘一次（flip-model 交换链仍持有窗口呈现，
+                // 若静默回退 GDI，GDI 画面可能被交换链内容覆盖而不可见）。
                 if (allowRetry) {
                     ReleaseDeviceResources();
                     if (D2DRenderer_Init(hWnd)) {
@@ -692,6 +709,7 @@ namespace {
                 }
                 return false;
             }
+            g_consecutivePresentFailures = 0;
         }
         return true;
     }
