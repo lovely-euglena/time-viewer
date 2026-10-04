@@ -29,7 +29,6 @@ class NTPClient;
 class NTPClient {
 private:
     WSADATA wsaData;
-    SOCKET sock;
     std::vector<NTP_SERVER_INFO> servers;
     std::mutex server_mutex;
     HANDLE timer_handle;
@@ -42,9 +41,15 @@ private:
     bool m_hasNetworkTime;
     CRITICAL_SECTION m_timeLock;
 
-    // ===== 取消机制 =====
+    // ===== 取消机制 & socket 归属 =====
     std::atomic<bool> m_cancelFlag{ false };
+    // 当前正在进行收发的 socket。仅在 m_sockMutex 保护下访问，
+    // 使 CancelPendingOperations 能关闭它来中断阻塞中的 recvfrom。
+    SOCKET m_activeSock = INVALID_SOCKET;
     std::mutex m_sockMutex;
+    // 串行化整个同步会话：定时器线程与手动同步可能并发调用 SyncTimeOnce，
+    // 用它确保同一时刻只有一个会话操作共享状态（socket、rng、Winsock 等）。
+    std::mutex m_syncMutex;
 
     // 初始化Winsock
     int InitializeWinsock() {
@@ -58,24 +63,46 @@ private:
     // 清理Winsock
     void CleanupWinsock() {
         if (is_initialized.load()) {
-            if (sock != INVALID_SOCKET) {
-                closesocket(sock);
-                sock = INVALID_SOCKET;
+            {
+                std::lock_guard<std::mutex> lock(m_sockMutex);
+                if (m_activeSock != INVALID_SOCKET) {
+                    closesocket(m_activeSock);
+                    m_activeSock = INVALID_SOCKET;
+                }
             }
             WSACleanup();
             is_initialized.store(false);
         }
     }
 
-    // 创建UDP socket
-    int CreateSocket() {
-        sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
-        if (sock == INVALID_SOCKET) {
-            return NTP_SOCKET_ERROR;
+    // 创建UDP socket，返回新 socket（失败返回 INVALID_SOCKET）
+    SOCKET CreateSocket() {
+        SOCKET s = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+        if (s == INVALID_SOCKET) {
+            return INVALID_SOCKET;
         }
         DWORD timeout = TIMEOUT_SECONDS * 1000;
-        setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, (char*)&timeout, sizeof(timeout));
-        return NTP_ERROR_NONE;
+        setsockopt(s, SOL_SOCKET, SO_RCVTIMEO, (char*)&timeout, sizeof(timeout));
+        return s;
+    }
+
+    // 登记活动 socket；若期间已请求取消则返回 false（调用方负责关闭）
+    bool RegisterSocket(SOCKET s) {
+        std::lock_guard<std::mutex> lock(m_sockMutex);
+        if (m_cancelFlag.load()) {
+            return false;
+        }
+        m_activeSock = s;
+        return true;
+    }
+
+    // 注销并关闭 socket；若已被取消操作接管则不再重复关闭，避免 double-close
+    void ReleaseSocket(SOCKET s) {
+        std::lock_guard<std::mutex> lock(m_sockMutex);
+        if (m_activeSock == s) {
+            closesocket(s);
+            m_activeSock = INVALID_SOCKET;
+        }
     }
 
     // 解析主机名
@@ -148,7 +175,7 @@ private:
         return NTP_ERROR_NONE;
     }
 
-    // 单次同步（内部）
+    // 单次同步（内部）：每次会话使用独立 socket
     int SyncOnceWithServer(const std::wstring& host, time_t& network_time) {
         if (m_cancelFlag.load()) {
             return NTP_RECV_ERROR;
@@ -165,45 +192,32 @@ private:
             return NTP_RECV_ERROR;
         }
 
-        int sock_result = CreateSocket();
-        if (sock_result != NTP_ERROR_NONE) {
-            return sock_result;
+        // 每次同步创建自己的 socket，避免定时器线程与手动同步共享同一 SOCKET
+        // 造成泄漏 / double-close / 使用已关闭句柄（issue IK6H7H）。
+        SOCKET s = CreateSocket();
+        if (s == INVALID_SOCKET) {
+            return NTP_SOCKET_ERROR;
+        }
+        if (!RegisterSocket(s)) {
+            // 会话建立前已被取消
+            closesocket(s);
+            return NTP_RECV_ERROR;
         }
 
         LARGE_INTEGER freq, start_time;
         QueryPerformanceFrequency(&freq);
         QueryPerformanceCounter(&start_time);
 
-        int send_result;
-        {
-            std::lock_guard<std::mutex> lock(m_sockMutex);
-            send_result = SendRequest(sock, server_addr);
-        }
+        int send_result = SendRequest(s, server_addr);
         if (send_result != NTP_ERROR_NONE) {
-            {
-                std::lock_guard<std::mutex> lock(m_sockMutex);
-                if (sock != INVALID_SOCKET) {
-                    closesocket(sock);
-                    sock = INVALID_SOCKET;
-                }
-            }
+            ReleaseSocket(s);
             return send_result;
         }
 
         NTP_PACKET response;
-        int recv_result;
-        {
-            std::lock_guard<std::mutex> lock(m_sockMutex);
-            recv_result = ReceiveResponse(sock, response);
-        }
+        int recv_result = ReceiveResponse(s, response);
         if (recv_result != NTP_ERROR_NONE) {
-            {
-                std::lock_guard<std::mutex> lock(m_sockMutex);
-                if (sock != INVALID_SOCKET) {
-                    closesocket(sock);
-                    sock = INVALID_SOCKET;
-                }
-            }
+            ReleaseSocket(s);
             UpdateServerHealth(host, INT_MAX, false);
             return recv_result;
         }
@@ -217,13 +231,7 @@ private:
         ULONG trans_frac = ntohl(response.TransmitTimestampFrac);
         network_time = ConvertToUnixTime(trans_sec, trans_frac);
 
-        {
-            std::lock_guard<std::mutex> lock(m_sockMutex);
-            if (sock != INVALID_SOCKET) {
-                closesocket(sock);
-                sock = INVALID_SOCKET;
-            }
-        }
+        ReleaseSocket(s);
 
         UpdateServerHealth(host, rtt_ms, true);
         return NTP_ERROR_NONE;
@@ -281,7 +289,7 @@ private:
     }
 
 public:
-    NTPClient() : sock(INVALID_SOCKET), timer_handle(NULL), rng(std::random_device{}()),
+    NTPClient() : timer_handle(NULL), rng(std::random_device{}()),
         m_hasNetworkTime(false) {
         InitializeCriticalSection(&m_timeLock);
         ZeroMemory(&m_lastNetworkTime, sizeof(m_lastNetworkTime));
@@ -292,6 +300,11 @@ public:
 
     ~NTPClient() {
         StopAutoSync();
+        {
+            // 等待可能正在执行的同步会话结束，再清理 Winsock，
+            // 避免与定时器回调中的 socket 操作竞争。
+            std::lock_guard<std::mutex> syncLock(m_syncMutex);
+        }
         CleanupWinsock();
         DeleteCriticalSection(&m_timeLock);
     }
@@ -317,6 +330,10 @@ public:
 
     // 执行一次同步，成功时保存网络时间
     bool SyncTimeOnce() {
+        // 串行化整个会话：定时器回调与手动同步若并发进入，
+        // 会竞争 rng / Winsock 初始化等共享状态。
+        std::lock_guard<std::mutex> syncLock(m_syncMutex);
+
         if (!is_initialized.load()) {
             int init_result = InitializeWinsock();
             if (init_result != NTP_ERROR_NONE) {
@@ -464,10 +481,14 @@ public:
 
     void CancelPendingOperations() {
         m_cancelFlag.store(true);
+
+        // 关闭活动 socket 以中断阻塞中的 recvfrom。整个“取出并关闭”在
+        // m_sockMutex 内完成，与 ReleaseSocket 互斥，避免 double-close
+        // 或句柄被复用后误关。
         std::lock_guard<std::mutex> lock(m_sockMutex);
-        if (sock != INVALID_SOCKET) {
-            closesocket(sock);
-            sock = INVALID_SOCKET;
+        if (m_activeSock != INVALID_SOCKET) {
+            closesocket(m_activeSock);
+            m_activeSock = INVALID_SOCKET;
         }
     }
 
