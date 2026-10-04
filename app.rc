@@ -2,10 +2,10 @@
 //
 #include "resource.h"
 /////////////////////////////////////////////////////////////////////////////
-// ����(���壬�й�) resources
+// Chinese (Simplified, China) resources
 
 #if !defined(AFX_RESOURCE_DLL) || defined(AFX_TARG_CHS)
-LANGUAGE 4, 2  // ��Ϊ������ʽ
+LANGUAGE 4, 2  // Chinese (Simplified)
 #pragma code_page(936)
 
 #ifdef APSTUDIO_INVOKED
@@ -48,7 +48,7 @@ IDI_ICON1               ICON                    "favicon.ico"
 //
 IDF_SOURCEHANS          RCDATA                  "Font\\SourceHanSans-Regular-Subset.otf"
 
-#endif    // ����(���壬�й�) resources
+#endif    // Chinese (Simplified, China) resources
 /////////////////////////////////////////////////////////////////////////////
 
 

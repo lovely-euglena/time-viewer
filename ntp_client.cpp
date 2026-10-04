@@ -479,8 +479,10 @@ public:
 // 全局NTP客户端实例
 static NTPClient* g_ntpClient = nullptr;
 
-// 工具函数
+// 工具函数：NTP 时间戳转 Unix 时间戳。
+// 本程序仅使用秒级精度，故有意忽略亚秒部分 ntp_frac。
 time_t ConvertToUnixTimeImpl(ULONG ntp_sec, ULONG ntp_frac) {
+    (void)ntp_frac; // 亚秒精度暂不使用
     if (ntp_sec == 0) return 0;
     return (time_t)(ntp_sec - NTP_TIME_OFFSET);
 }
