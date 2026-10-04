@@ -767,11 +767,13 @@ void StartSync(HWND hWnd) {
     // 左上角时间来源文字后追加“同步中”，立即重绘使其可见。
     InvalidateRect(hWnd, NULL, FALSE);
     if (hSyncBtn) SetWindowTextW(hSyncBtn, L"同步中...");
-    ResetCancel();
     if (g_syncThread.joinable()) {
         CancelPendingOperations();
         g_syncThread.join();
     }
+    // 必须在 join 之后重置：CancelPendingOperations 会置位取消标志，
+    // 若先 ResetCancel 再取消，新线程一进入 SyncTimeOnce 就会因标志仍为 true 立即失败。
+    ResetCancel();
     g_syncThread = std::thread(SyncThreadProc, hWnd);
 }
 

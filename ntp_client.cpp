@@ -218,7 +218,10 @@ private:
         int recv_result = ReceiveResponse(s, response);
         if (recv_result != NTP_ERROR_NONE) {
             ReleaseSocket(s);
-            UpdateServerHealth(host, INT_MAX, false);
+            // 因取消而中断的接收不应把服务器误判为不可用
+            if (!m_cancelFlag.load()) {
+                UpdateServerHealth(host, INT_MAX, false);
+            }
             return recv_result;
         }
 
