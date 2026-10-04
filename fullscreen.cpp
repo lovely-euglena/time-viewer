@@ -172,14 +172,6 @@ bool HandleNcLButtonDblClk(HWND hWnd, WPARAM wParam)
 }
 
 /**
- * 处理WM_GETMINMAXINFO消息以限制窗口最小大小
- * @param lParam: MINMAXINFO结构指针
- */
-void HandleGetMinMaxInfo(LPARAM lParam)
-{
-}
-
-/**
  * 全屏模块初始化函数
  * 可在程序启动时调用以初始化全屏模块状态
  * @param hWnd: 主窗口句柄（可选）
@@ -252,61 +244,4 @@ UINT GetWindowDpi(HWND hWnd) {
     }
 
     return dpi;
-}
-
-// fullscreen.cpp - 在文件末尾添加函数实现
-
-/**
- * 设置窗口的最小尺寸
- * @param hWnd: 窗口句柄
- * @param minWidth: 最小宽度
- * @param minHeight: 最小高度
- */
-void SetWindowMinSize(HWND hWnd, int minWidth, int minHeight) {
-    if (!hWnd || !IsWindow(hWnd)) return;
-
-    // 设置窗口最小尺寸（会触发 WM_GETMINMAXINFO）
-    RECT rc = { 0, 0, minWidth, minHeight };
-    AdjustWindowRectEx(&rc, GetWindowLong(hWnd, GWL_STYLE), FALSE,
-        GetWindowLong(hWnd, GWL_EXSTYLE));
-
-    // 保存最小尺寸到窗口的额外数据或使用全局变量
-    // 这里我们通过 WM_GETMINMAXINFO 来处理
-}
-
-/**
- * 约束窗口的宽高比例
- * @param hWnd: 窗口句柄
- * @param width: 当前宽度
- * @param height: 当前高度
- * @param targetWidth: 目标比例宽度（如 6）
- * @param targetHeight: 目标比例高度（如 5）
- */
-void ConstrainWindowAspectRatio(HWND hWnd, int width, int height,
-    int targetWidth, int targetHeight) {
-    if (!hWnd || !IsWindow(hWnd)) return;
-
-    // 计算当前比例
-    float currentRatio = (float)width / height;
-    float targetRatio = (float)targetWidth / targetHeight;
-
-    int newWidth = width;
-    int newHeight = height;
-
-    // 如果当前比例小于目标比例（太窄），调整宽度
-    if (currentRatio < targetRatio) {
-        newWidth = (int)(height * targetRatio);
-        newHeight = height;
-    }
-    // 如果当前比例大于目标比例（太宽），调整高度
-    else if (currentRatio > targetRatio) {
-        newWidth = width;
-        newHeight = (int)(width / targetRatio);
-    }
-
-    // 应用新尺寸
-    if (newWidth != width || newHeight != height) {
-        SetWindowPos(hWnd, NULL, 0, 0, newWidth, newHeight,
-            SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
-    }
 }
