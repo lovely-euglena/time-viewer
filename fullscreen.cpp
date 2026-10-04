@@ -2,9 +2,13 @@
 // 全屏切换功能模块实现文件
 // 提供F11快捷键和标题栏双击切换全屏功能，支持真正的全屏覆盖（含任务栏）
 
+// 避免 windows.h 定义 min/max 宏，统一使用 std::max / std::min
+#define NOMINMAX
+
 #include "fullscreen.h"
 #include <windows.h>
 #include <winuser.h>
+#include <algorithm>
 
 extern bool g_topmost;
 
@@ -98,8 +102,8 @@ bool ToggleFullscreen(HWND hWnd) {
         int actualMinHeight = minRect.bottom - minRect.top;
 
         if (width < actualMinWidth || height < actualMinHeight) {
-            width = max(width, actualMinWidth);
-            height = max(height, actualMinHeight);
+            width = std::max(width, actualMinWidth);
+            height = std::max(height, actualMinHeight);
             SetWindowPos(hWnd, NULL, 0, 0, width, height,
                 SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
         }

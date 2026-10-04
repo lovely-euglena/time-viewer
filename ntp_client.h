@@ -70,7 +70,6 @@ typedef struct {
  */
 typedef struct {
     wchar_t serverName[256];       ///< 服务器域名或IP
-    sockaddr_in serverAddr;        ///< 服务器地址结构
     int port;                      ///< 服务器端口
     DWORD responseTime;            ///< 响应时间（毫秒）
     SERVER_STATUS status;          ///< 服务器当前状态

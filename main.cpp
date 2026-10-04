@@ -2,6 +2,9 @@
 // Windows 11风格时间显示主程序
 // 修改：基于 DPI 动态调整所有尺寸上限（按钮、字体、窗口最小尺寸）
 
+// 避免 windows.h 定义 min/max 宏，统一使用 std::min / std::max
+#define NOMINMAX
+
 // 必须最先包含 winsock2.h，避免与 windows.h 冲突
 #include <winsock2.h>
 #include <ws2tcpip.h>
@@ -11,9 +14,11 @@
 #include <dwmapi.h>
 #include <commctrl.h>
 #include <shellapi.h>
+#include <windowsx.h>
 #include <strsafe.h>
 // 其余头文件
 #include <string>
+#include <algorithm>
 #include <thread>
 #include <atomic>
 #include <new>
@@ -399,7 +404,7 @@ static void ShowHelpAndExit() {
     int pageLines = 25;
     if (GetConsoleScreenBufferInfo(hCon, &csbi)) {
         int windowHeight = csbi.srWindow.Bottom - csbi.srWindow.Top + 1;
-        pageLines = max(10, windowHeight - 1);
+        pageLines = std::max(10, windowHeight - 1);
     }
 
     // 准备标准输入句柄，用于 ReadConsoleInput（同时捕获键盘和鼠标）
@@ -599,23 +604,22 @@ void UpdateButtonLayout(HWND hWnd) {
     int minBtnHeight = ScaleByDpi(BASE_MIN_BTN_HEIGHT, hWnd);
     int maxBtnHeight = ScaleByDpi(BASE_MAX_BTN_HEIGHT, hWnd);
 
-    int newBtnWidth = max(minBtnWidth, min(maxBtnWidth, clientWidth / 7));
-    int newBtnHeight = max(minBtnHeight, min(maxBtnHeight, clientHeight / 12));
+    int newBtnWidth = std::max(minBtnWidth, std::min(maxBtnWidth, clientWidth / 7));
+    int newBtnHeight = std::max(minBtnHeight, std::min(maxBtnHeight, clientHeight / 12));
 
-    int spacing = max(8, (int)(newBtnWidth * 0.2f));
-    int marginBottom = max(15, (int)(clientHeight * 0.03f));
+    int spacing = std::max(8, (int)(newBtnWidth * 0.2f));
+    int marginBottom = std::max(15, (int)(clientHeight * 0.03f));
 
     int totalWidth = newBtnWidth * 4 + spacing * 3;
-    int startX = max(0, (clientWidth - totalWidth) / 2);
+    int startX = std::max(0, (clientWidth - totalWidth) / 2);
     int btnY = clientHeight - newBtnHeight - marginBottom;
 
     g_buttonWidth = newBtnWidth;
     g_buttonHeight = newBtnHeight;
 
     // 使用 BeginDeferWindowPos / EndDeferWindowPos 原子批量更新按钮位置，
-    // 四个按钮在单次窗口呈现中同时移动到位，消除逐个 SetWindowPos 的中间态闪烁。
-    // 配合 WS_EX_COMPOSITED（非透明度模式）由 DWM 离屏缓冲一次性合成；
-    // 透明度模式下虽无 DWM 缓冲，但 DeferWindowPos 本身也减少了刷新次数。
+    // 四个按钮在单次刷新中同时移动到位，消除逐个 SetWindowPos 的中间态闪烁。
+    // 注意：本程序未使用 WS_EX_COMPOSITED（与 D2D HWND RenderTarget 不兼容）。
     HDWP hdwp = BeginDeferWindowPos(4);
     if (hdwp) {
         DeferWindowPos(hdwp, hFullscreenBtn, NULL,
@@ -640,8 +644,7 @@ void UpdateButtonLayout(HWND hWnd) {
     InvalidateRect(hTopmostBtn,    NULL, TRUE);
 
     // 实时更新字体大小：CreateDynamicFonts 内部拥有字体尺寸缓存，
-    // 尺寸未变时直接返回，不产生实际开销。
-    // 配合 WS_EX_COMPOSITED 离屏缓冲，频繁重建字体也不会有闪烁。
+    // 尺寸未变时直接返回，不产生实际开销，频繁调用也不会闪烁。
     CreateDynamicFonts(hWnd);
 }
 
@@ -650,7 +653,7 @@ void CreateDynamicFonts(HWND hWnd) {
 
     // 提前计算按钮字体尺寸，用于缓存判断
     int minBtnFont = ScaleByDpi(BASE_MIN_BTN_FONT, hWnd);
-    int btnFontSize = max(minBtnFont, (int)(g_buttonHeight * 0.4));
+    int btnFontSize = std::max(minBtnFont, (int)(g_buttonHeight * 0.4));
 
     // === 字体尺寸缓存：仅当尺寸真正变化时才重建字体，避免无用 DeleteObject/CreateFont ===
     static FontSizes lastSizes = { 0 };
@@ -791,15 +794,15 @@ FontSizes CalculateFontSizes(HWND hWnd) {
     int targetTimeHeight = (int)(windowHeight * 0.35);
     sizes.time = (int)(targetTimeHeight * 0.75);
     int minTimeFont = ScaleByDpi(BASE_MIN_TIME_FONT, hWnd);
-    sizes.time = max(minTimeFont, min(sizes.time, (int)(windowHeight * 0.45)));
+    sizes.time = std::max(minTimeFont, std::min(sizes.time, (int)(windowHeight * 0.45)));
 
     sizes.date = (int)(sizes.time * 0.3);
     int minDateFont = ScaleByDpi(BASE_MIN_DATE_FONT, hWnd);
-    sizes.date = max(minDateFont, min(sizes.date, (int)(windowHeight * 0.12)));
+    sizes.date = std::max(minDateFont, std::min(sizes.date, (int)(windowHeight * 0.12)));
 
     sizes.week = (int)(sizes.time * 0.3);
     int minWeekFont = ScaleByDpi(BASE_MIN_WEEK_FONT, hWnd);
-    sizes.week = max(minWeekFont, min(sizes.week, (int)(windowHeight * 0.1)));
+    sizes.week = std::max(minWeekFont, std::min(sizes.week, (int)(windowHeight * 0.1)));
 
     // 来源字体：基准范围 10~26，随 DPI 缩放
     int baseSourceMin = 10;
@@ -807,7 +810,7 @@ FontSizes CalculateFontSizes(HWND hWnd) {
     int minSourceFont = ScaleByDpi(baseSourceMin, hWnd);
     int maxSourceFont = ScaleByDpi(baseSourceMax, hWnd);
     int rawSource = (int)(sizes.time * 0.25);
-    sizes.source = max(minSourceFont, min(maxSourceFont, rawSource));
+    sizes.source = std::max(minSourceFont, std::min(maxSourceFont, rawSource));
 
     return sizes;
 }
@@ -1252,7 +1255,9 @@ int WINAPI wWinMain(_In_ HINSTANCE hInstance,
     }
 
     // ===== 高DPI设置 =====
-    HMODULE hUser32 = LoadLibraryW(L"user32.dll");
+    // user32.dll 在进程启动时已加载，用 GetModuleHandleW 获取句柄，
+    // 避免 LoadLibraryW 额外的引用计数（也无需 FreeLibrary）。
+    HMODULE hUser32 = GetModuleHandleW(L"user32.dll");
     if (hUser32) {
         auto pSetProcessDpiAwarenessContext = (BOOL(WINAPI*)(DPI_AWARENESS_CONTEXT))GetProcAddress(hUser32, "SetProcessDpiAwarenessContext");
         if (pSetProcessDpiAwarenessContext) {
@@ -1263,11 +1268,10 @@ int WINAPI wWinMain(_In_ HINSTANCE hInstance,
             SetProcessDPIAware();
             LOGV(L"DPI: System Aware（Win7 回退）");
         }
-        FreeLibrary(hUser32);
     }
     else {
         SetProcessDPIAware();
-        LOGV(L"DPI: System Aware（user32 加载失败回退）");
+        LOGV(L"DPI: System Aware（user32 句柄获取失败回退）");
     }
 
     UNREFERENCED_PARAMETER(hPrevInstance);
@@ -1450,7 +1454,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) 
 
     case WM_ERASEBKGND: {
         // 所有绘制都在 WM_PAINT 双缓冲中完成，系统无需擦除背景。
-        // 配合 WS_EX_COMPOSITED 和 nullptr 背景画刷，彻底消除背景闪烁。
+        // 配合 nullptr 背景画刷，彻底消除背景闪烁。
         return TRUE;
     }
 
@@ -1714,7 +1718,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) 
 
     case WM_LBUTTONUP: {
         if (!g_hideButtons && hFullscreenBtn && hExitBtn && hSyncBtn && hTopmostBtn) {
-            POINT pt = { LOWORD(lParam), HIWORD(lParam) };
+            POINT pt = { GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam) };
             bool inBtn = false;
             HWND btns[] = { hFullscreenBtn, hExitBtn, hSyncBtn, hTopmostBtn };
             for (HWND btn : btns) {
