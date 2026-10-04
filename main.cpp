@@ -1541,12 +1541,24 @@ int WINAPI wWinMain(_In_ HINSTANCE hInstance,
     if (doRestore) {
         WINDOWPLACEMENT wp = { sizeof(wp) };
         if (GetWindowPlacement(hMainWindow, &wp)) {
-            wp.rcNormalPosition.left   = g_appState.left;
-            wp.rcNormalPosition.top    = g_appState.top;
-            wp.rcNormalPosition.right  = g_appState.right;
-            wp.rcNormalPosition.bottom = g_appState.bottom;
-            wp.showCmd = (g_appState.showCmd == SW_SHOWMAXIMIZED) ? SW_SHOWMAXIMIZED : SW_SHOWNORMAL;
-            SetWindowPlacement(hMainWindow, &wp);
+            RECT rc = { g_appState.left, g_appState.top, g_appState.right, g_appState.bottom };
+            int w = rc.right - rc.left;
+            int h = rc.bottom - rc.top;
+            if (w > 0 && h > 0) {
+                // 校验还原位置是否仍落在某台显示器上（显示器被拔出 / 分辨率变化）
+                if (!MonitorFromRect(&rc, MONITOR_DEFAULTTONULL)) {
+                    HMONITOR hPrim = MonitorFromPoint(POINT{ 0, 0 }, MONITOR_DEFAULTTOPRIMARY);
+                    MONITORINFO mi = { sizeof(mi) };
+                    if (hPrim && GetMonitorInfo(hPrim, &mi)) {
+                        int cx = mi.rcWork.left + ((mi.rcWork.right - mi.rcWork.left) - w) / 2;
+                        int cy = mi.rcWork.top + ((mi.rcWork.bottom - mi.rcWork.top) - h) / 2;
+                        rc.left = cx; rc.top = cy; rc.right = cx + w; rc.bottom = cy + h;
+                    }
+                }
+                wp.rcNormalPosition = rc;
+                wp.showCmd = (g_appState.showCmd == SW_SHOWMAXIMIZED) ? SW_SHOWMAXIMIZED : SW_SHOWNORMAL;
+                SetWindowPlacement(hMainWindow, &wp);
+            }
         }
     }
 
@@ -2022,6 +2034,22 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) 
             InvalidateRect(hWnd, NULL, FALSE);
         }
         return TRUE;
+    }
+
+    case WM_QUERYENDSESSION: {
+        // 系统将要关机/注销：先保存 UI 状态，并允许会话结束
+        SaveUiState();
+        return TRUE;
+    }
+
+    case WM_ENDSESSION: {
+        if (wParam) {
+            // 会话确定结束（关机/注销）：标记为正常退出，避免下次启动被误判为崩溃
+            g_appState.cleanExit = true;
+            g_appState.crashCount = 0;
+            AppStateSave(g_appState);
+        }
+        break;
     }
 
     case WM_DESTROY: {
