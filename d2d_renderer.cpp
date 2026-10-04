@@ -278,10 +278,20 @@ namespace {
                 D3D_FEATURE_LEVEL_9_3,  D3D_FEATURE_LEVEL_9_2,  D3D_FEATURE_LEVEL_9_1
             };
             UINT flags = D3D11_CREATE_DEVICE_BGRA_SUPPORT;
+            const UINT numLevels = (UINT)(sizeof(levels) / sizeof(levels[0]));
             HRESULT hr = g_pfnD3D11CreateDevice(
                 nullptr, D3D_DRIVER_TYPE_HARDWARE, nullptr, flags,
-                levels, (UINT)(sizeof(levels) / sizeof(levels[0])), D3D11_SDK_VERSION,
+                levels, numLevels, D3D11_SDK_VERSION,
                 &g_d3dDevice, nullptr, &immediate);
+            if (FAILED(hr) || !g_d3dDevice) {
+                // 硬件驱动创建失败（远程桌面 / 虚拟机常见）→ 尝试 WARP 软件驱动，
+                // 以保住 flip-model + DWM 合成路径（比直接回退 HWND RT 更好）。
+                LOGV(L"D2D: D3D11CreateDevice(HARDWARE) 失败 (0x%08X)，尝试 WARP", (unsigned)hr);
+                hr = g_pfnD3D11CreateDevice(
+                    nullptr, D3D_DRIVER_TYPE_WARP, nullptr, flags,
+                    levels, numLevels, D3D11_SDK_VERSION,
+                    &g_d3dDevice, nullptr, &immediate);
+            }
             if (FAILED(hr) || !g_d3dDevice) {
                 LOGV(L"D2D: D3D11CreateDevice 失败 (0x%08X)", (unsigned)hr);
                 break;
@@ -671,10 +681,10 @@ namespace {
         if (g_useDeviceContext && g_swapChain) {
             HRESULT hrPresent = g_swapChain->Present(1, 0);
             if (FAILED(hrPresent)) {
-                bool deviceLost = (hrPresent == DXGI_ERROR_DEVICE_REMOVED ||
-                                   hrPresent == DXGI_ERROR_DEVICE_RESET);
-                LOGV(L"D2D: Present 失败 (0x%08X)", (unsigned)hrPresent);
-                if (deviceLost && allowRetry) {
+                LOGV(L"D2D: Present 失败 (0x%08X)，标记重建设备", (unsigned)hrPresent);
+                // 任何 Present 失败都重建设备：flip-model 交换链仍持有窗口呈现，
+                // 若静默回退 GDI，GDI 画面可能被交换链内容覆盖而不可见。
+                if (allowRetry) {
                     ReleaseDeviceResources();
                     if (D2DRenderer_Init(hWnd)) {
                         return RenderInternal(hWnd, info, false);
