@@ -26,6 +26,7 @@
 #include "ntp_client.h"
 #include "resource.h"
 #include "debug_log.h"
+#include "app_state.h"
 
 // ===== Windows 7 兼容：手动定义 Windows 10/11 新增的类型和常量 =====
 // 当 _WIN32_WINNT=0x0601 (Win7) 时，旧版 SDK 头文件不会导出这些类型/常量
@@ -185,6 +186,17 @@ std::wstring g_cmdFontPath;           // --font-path 参数指定的字体文件
 std::wstring g_fontFamilyToUse;       // 最终解析后实际使用的字体族名称
 bool g_fontLoadedFromPath = false;    // 是否通过 --font-path 从外部文件加载了字体
 
+// ===== 崩溃恢复 / UI 状态持久化 =====
+static AppState g_appState;               // 当前 UI 状态 + 崩溃簿记快照
+static bool g_restoreUi = false;          // 本次是否为崩溃后重启（--restored）
+static bool g_safeMode = false;           // 连续崩溃过多时以默认状态启动
+static int  g_crashCount = 0;             // 本会话继承的连续崩溃计数
+static bool g_stateSavingEnabled = false; // 启动还原完成前不写状态，避免覆盖已保存值
+static unsigned long g_restartWaitPid = 0;// --restart-wait：等待该进程退出后再启动
+
+#define CRASH_SAFE_MODE_LIMIT 3           // 达到该次数后以默认 UI 启动
+#define CRASH_HARD_LIMIT      5           // 达到该次数后不再自动重启
+
 // ===== 按钮动态尺寸相关全局变量 =====
 int g_buttonWidth = 0;          // 当前按钮宽度（像素）
 int g_buttonHeight = 0;         // 当前按钮高度（像素）
@@ -216,6 +228,11 @@ void ShowButtons(HWND hWnd);
 void HideButtons(HWND hWnd);
 void ResetInterActionTimer();
 void CheckAutoHide(HWND hWnd);
+
+// 崩溃恢复 / UI 状态保存
+static void CaptureUiState(AppState& s);
+static void SaveUiState();
+static void SaveUiStateIfChanged();
 
 int GetDisplayTime(SYSTEMTIME& st);
 std::wstring GetTimeDateStringEx();
@@ -847,6 +864,7 @@ void ToggleTopmost(HWND hWnd) {
             (g_noHotKeys ? L"取消置顶" : L"消顶 (F6)") :
             (g_noHotKeys ? L"置顶" : L"置顶 (F6)"));
     }
+    SaveUiState();
 }
 
 // ===== 按钮自动隐藏功能 =====
@@ -866,6 +884,7 @@ void ShowButtons(HWND hWnd) {
         }
         g_buttonsVisible = true;
         InvalidateRect(hWnd, NULL, FALSE); // 按钮已显示，立即移除左上角“同步中”
+        SaveUiState();
     }
 }
 
@@ -884,6 +903,7 @@ void HideButtons(HWND hWnd) {
         }
         g_buttonsVisible = false;
         InvalidateRect(hWnd, NULL, FALSE); // 按钮已隐藏，若同步中则立即在左上角显示“同步中”
+        SaveUiState();
     }
 }
 
@@ -903,6 +923,56 @@ void CheckAutoHide(HWND hWnd) {
     }
     if (GetTickCount64() - g_lastInteractionTime >= AUTO_HIDE_IDLE_MS) {
         HideButtons(hWnd);
+    }
+}
+
+// ===== 崩溃恢复 / UI 状态持久化 =====
+
+// 把当前 UI 状态抓取到 AppState 快照
+static void CaptureUiState(AppState& s) {
+    if (hMainWindow && IsWindow(hMainWindow)) {
+        WINDOWPLACEMENT wp = { sizeof(wp) };
+        if (GetWindowPlacement(hMainWindow, &wp)) {
+            s.left   = wp.rcNormalPosition.left;
+            s.top    = wp.rcNormalPosition.top;
+            s.right  = wp.rcNormalPosition.right;
+            s.bottom = wp.rcNormalPosition.bottom;
+            s.showCmd = wp.showCmd;
+        }
+    }
+    s.fullscreen     = IsFullscreen();
+    s.topmost        = g_topmost;
+    s.buttonsVisible = g_buttonsVisible;
+}
+
+// 立即保存当前 UI 状态（保留崩溃簿记字段）
+static void SaveUiState() {
+    if (!g_stateSavingEnabled) return;
+    CaptureUiState(g_appState);
+    g_appState.cleanExit = false; // 尚在运行
+    AppStateSave(g_appState);
+}
+
+// 仅在 UI 状态相较上次保存发生变化时写入，避免频繁落盘
+static void SaveUiStateIfChanged() {
+    if (!g_stateSavingEnabled) return;
+    AppState snap = g_appState;
+    CaptureUiState(snap);
+    bool changed = snap.left != g_appState.left || snap.top != g_appState.top ||
+        snap.right != g_appState.right || snap.bottom != g_appState.bottom ||
+        snap.showCmd != g_appState.showCmd || snap.fullscreen != g_appState.fullscreen ||
+        snap.topmost != g_appState.topmost || snap.buttonsVisible != g_appState.buttonsVisible;
+    if (changed) {
+        g_appState.left          = snap.left;
+        g_appState.top           = snap.top;
+        g_appState.right         = snap.right;
+        g_appState.bottom        = snap.bottom;
+        g_appState.showCmd       = snap.showCmd;
+        g_appState.fullscreen    = snap.fullscreen;
+        g_appState.topmost       = snap.topmost;
+        g_appState.buttonsVisible = snap.buttonsVisible;
+        g_appState.cleanExit     = false;
+        AppStateSave(g_appState);
     }
 }
 
@@ -1014,6 +1084,40 @@ static void ReportError(const wchar_t* msg) {
     if (ShouldShowDialog()) {
         MessageBoxW(nullptr, msg, L"TimeDisplay - 参数错误", MB_OK | MB_ICONERROR);
     }
+}
+
+// ===== 崩溃后自动重启 =====
+
+// 未处理异常兜底：尽力保存状态，并自行拉起新实例（附带 --restored）。
+// 成功自拉起后主动 TerminateProcess（exit 非崩溃，避免系统再触发一次重启）；
+// 若自拉起失败或已达硬上限，返回 EXCEPTION_CONTINUE_SEARCH，交由系统
+// （RegisterApplicationRestart / WER）处理。
+static LONG WINAPI CrashHandler(EXCEPTION_POINTERS* /*ep*/) {
+    __try {
+        SaveUiState();
+    }
+    __except (EXCEPTION_EXECUTE_HANDLER) {
+        // 崩溃上下文中保存失败也无妨，继续尝试重启
+    }
+
+    if (g_crashCount < CRASH_HARD_LIMIT) {
+        wchar_t newCmd[2048] = {};
+        HRESULT hr = StringCchPrintfW(newCmd, _countof(newCmd),
+            L"%s --restored --restart-wait %lu",
+            GetCommandLineW(), (unsigned long)GetCurrentProcessId());
+        if (SUCCEEDED(hr)) {
+            STARTUPINFOW si = { sizeof(si) };
+            PROCESS_INFORMATION pi = {};
+            if (CreateProcessW(nullptr, newCmd, nullptr, nullptr, FALSE,
+                0, nullptr, nullptr, &si, &pi)) {
+                CloseHandle(pi.hThread);
+                CloseHandle(pi.hProcess);
+                TerminateProcess(GetCurrentProcess(), 1);
+                return EXCEPTION_EXECUTE_HANDLER;
+            }
+        }
+    }
+    return EXCEPTION_CONTINUE_SEARCH;
 }
 
 int WINAPI wWinMain(_In_ HINSTANCE hInstance,
@@ -1185,6 +1289,16 @@ int WINAPI wWinMain(_In_ HINSTANCE hInstance,
                     ++i;
                 }
             }
+            else if (wcscmp(argv[i], L"--restored") == 0) {
+                // 崩溃恢复重启：按上次保存的 UI 状态复原
+                g_restoreUi = true;
+            }
+            else if (wcscmp(argv[i], L"--restart-wait") == 0) {
+                // 崩溃自重启时等待旧实例退出，避免出现两个实例
+                if (i + 1 < argc && IsNumericString(argv[i + 1])) {
+                    g_restartWaitPid = (unsigned long)_wtoi(argv[++i]);
+                }
+            }
             else {
                 // 无法识别的参数 → 报错并退出
                 wchar_t errMsg[384];
@@ -1208,6 +1322,41 @@ int WINAPI wWinMain(_In_ HINSTANCE hInstance,
     }
     if (g_givehelp) {
         ShowHelpAndExit();
+    }
+
+    // ===== 崩溃恢复：加载 UI 状态 + 连续崩溃计数 =====
+    bool hadState = AppStateLoad(g_appState);
+    if (!hadState) {
+        g_appState = AppState{}; // 首次运行，使用默认值
+    }
+    if (hadState && !g_appState.cleanExit) {
+        g_appState.crashCount++; // 上次未正常退出 → 视为一次崩溃
+    }
+    g_crashCount = g_appState.crashCount;
+    g_safeMode = (g_crashCount >= CRASH_SAFE_MODE_LIMIT);
+    // 标记本次会话“未正常退出”，若崩溃则下次启动即可感知
+    g_appState.cleanExit = false;
+    AppStateSave(g_appState);
+
+    bool doRestore = g_restoreUi && !g_safeMode && hadState;
+    LOGI(L"崩溃恢复: 已有状态=%d, 连续崩溃=%d, 安全模式=%d, 本次恢复UI=%d",
+        hadState ? 1 : 0, g_crashCount, g_safeMode ? 1 : 0, doRestore ? 1 : 0);
+
+    // 注册系统级自动重启（达到硬上限后不再注册，避免无限重启）
+    if (g_crashCount >= CRASH_HARD_LIMIT) {
+        LOGI(L"崩溃恢复: 连续崩溃已达硬上限 %d，本次不注册自动重启", CRASH_HARD_LIMIT);
+    } else if (!RegisterApplicationRestart(L"--restored", 0)) {
+        LOGV(L"崩溃恢复: RegisterApplicationRestart 失败（继续依赖异常兜底）");
+    }
+    SetUnhandledExceptionFilter(CrashHandler);
+
+    // 崩溃自重启时等待旧实例退出，避免出现两个实例
+    if (g_restartWaitPid != 0) {
+        HANDLE hOld = OpenProcess(SYNCHRONIZE, FALSE, (DWORD)g_restartWaitPid);
+        if (hOld) {
+            WaitForSingleObject(hOld, 5000);
+            CloseHandle(hOld);
+        }
     }
 
     // ===== 字体参数验证 =====
@@ -1380,19 +1529,48 @@ int WINAPI wWinMain(_In_ HINSTANCE hInstance,
         LOGI(L"渲染: D2D 初始化失败，回退 GDI（详见上方 D2D 日志）");
     }
 
-    if (g_startTopmost) {
+    bool wantTopmost = g_startTopmost;
+    if (doRestore) wantTopmost = g_appState.topmost;
+    if (wantTopmost) {
         g_topmost = true;
         SetWindowLong(hMainWindow, GWL_EXSTYLE, GetWindowLong(hMainWindow, GWL_EXSTYLE) | WS_EX_TOPMOST);
         SetWindowPos(hMainWindow, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
     }
 
-    ShowWindow(hMainWindow, nCmdShow);
+    // 复原窗口普通位置/大小（SetWindowPlacement 使用工作区坐标）
+    if (doRestore) {
+        WINDOWPLACEMENT wp = { sizeof(wp) };
+        if (GetWindowPlacement(hMainWindow, &wp)) {
+            wp.rcNormalPosition.left   = g_appState.left;
+            wp.rcNormalPosition.top    = g_appState.top;
+            wp.rcNormalPosition.right  = g_appState.right;
+            wp.rcNormalPosition.bottom = g_appState.bottom;
+            wp.showCmd = (g_appState.showCmd == SW_SHOWMAXIMIZED) ? SW_SHOWMAXIMIZED : SW_SHOWNORMAL;
+            SetWindowPlacement(hMainWindow, &wp);
+        }
+    }
+
+    int startupShowCmd = nCmdShow;
+    if (doRestore && g_appState.showCmd == SW_SHOWMAXIMIZED) {
+        startupShowCmd = SW_SHOWMAXIMIZED;
+    }
+    ShowWindow(hMainWindow, startupShowCmd);
     UpdateWindow(hMainWindow);
 
-    if (g_startFullscreen) {
+    bool wantFullscreen = g_startFullscreen;
+    if (doRestore) wantFullscreen = g_appState.fullscreen;
+    if (wantFullscreen) {
         ToggleFullscreen(hMainWindow);
         if (hFullscreenBtn) SetWindowTextW(hFullscreenBtn, IsFullscreen() ? L"窗口化 (F11)" : L"全屏 (F11)");
     }
+
+    // 复原按钮显隐（命令行为 --no-button 时不涉及）
+    if (doRestore && !g_hideButtons && !g_appState.buttonsVisible) {
+        HideButtons(hMainWindow);
+    }
+
+    // 启动还原完成，此后允许持久化 UI 状态
+    g_stateSavingEnabled = true;
 
     StartSync(hMainWindow);
     SetTimer(hMainWindow, TIMER_AUTO_SYNC, AUTO_SYNC_INTERVAL_MS, nullptr);
@@ -1424,6 +1602,11 @@ int WINAPI wWinMain(_In_ HINSTANCE hInstance,
     CleanupNTPClient();
     CleanupFullscreenModule();
     D2DRenderer_Cleanup();
+
+    // 正常退出：清除崩溃簿记，下次启动不再视为崩溃
+    g_appState.cleanExit = true;
+    g_appState.crashCount = 0;
+    AppStateSave(g_appState);
 
     LOGI(L"退出: 退出码=%d", (int)msg.wParam);
     return (int)msg.wParam;
@@ -1519,6 +1702,12 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) 
             D2DRenderer_OnResize(hWnd, rc.right - rc.left, rc.bottom - rc.top);
         }
         InvalidateRect(hWnd, NULL, FALSE);
+        break;
+    }
+
+    case WM_EXITSIZEMOVE: {
+        // 拖拽/缩放结束，保存窗口位置与大小
+        SaveUiState();
         break;
     }
 
@@ -1633,6 +1822,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) 
             if (currentSource != lastSourceStr) { lastSourceStr = currentSource; needRedraw = true; }
             if (needRedraw) InvalidateRect(hWnd, NULL, FALSE);
             CheckAutoHide(hWnd);
+            SaveUiStateIfChanged();
         }
         else if (wParam == 2) {
             if (hSyncBtn) SetWindowTextW(hSyncBtn, L"同步 (F5)");
@@ -1843,6 +2033,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) 
             UnregisterHotKey(hWnd, 3);
             UnregisterHotKey(hWnd, 4);
         }
+        SaveUiState(); // 关窗前保存最终 UI 状态
         PostQuitMessage(0);
         break;
     }
