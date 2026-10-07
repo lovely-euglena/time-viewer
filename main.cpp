@@ -1534,7 +1534,8 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) 
                 if (IsWindowVisible(btn)) {
                     RECT btnRect;
                     GetWindowRect(btn, &btnRect);
-                    MapWindowRect(HWND_DESKTOP, hWnd, &btnRect);
+                    MapWindowPoints(HWND_DESKTOP, hWnd,
+                        reinterpret_cast<LPPOINT>(&btnRect), 2);
                     if (PtInRect(&btnRect, pt)) {
                         inBtn = true;
                         break;
