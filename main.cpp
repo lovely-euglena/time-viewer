@@ -269,16 +269,45 @@ static void WriteTextToHandle(HANDLE hOut, const wchar_t* msg) {
     WriteFile(hOut, buf.data(), (DWORD)buf.size(), &written, nullptr);
 }
 
+// 清理 std 槽位中已失效的句柄（启动探测 Attach→Free 后残留的死控制台句柄）。
+// 死句柄非 NULL 且非 INVALID_HANDLE_VALUE，会绕过后续的有效性检查，
+// 导致写入静默失败（--help/--version 无输出的根因，见 issue #46）；
+// 文件/管道（重定向）句柄不受影响，原样保留。
+static void SanitizeStdHandles() {
+    const DWORD slots[] = { STD_INPUT_HANDLE, STD_OUTPUT_HANDLE, STD_ERROR_HANDLE };
+    for (DWORD slot : slots) {
+        HANDLE h = GetStdHandle(slot);
+        if (!h || h == INVALID_HANDLE_VALUE) continue;
+        SetLastError(0);
+        if (GetFileType(h) == FILE_TYPE_UNKNOWN && GetLastError() == ERROR_INVALID_HANDLE) {
+            SetStdHandle(slot, nullptr);
+        }
+    }
+}
+
+// 获取可写的控制台输出句柄，三级兜底：
+// 1) std 槽位现有句柄；2) 附加父控制台 / 分配新控制台后重取；
+// 3) 直接打开 CONOUT$——AttachConsole 仅在槽位为空时补设句柄，
+//    槽位残留死值时重取仍无效，直接开 CONOUT$ 可绕过 std 槽位兜底。
+// selfAllocated 出参：控制台是否为本次 AllocConsole 临时分配（GUI 双击场景），
+// 调用方据此决定展示后是否等待按键，避免窗口随进程退出一闪而过。
+static HANDLE AcquireConsoleOut(bool* selfAllocated = nullptr) {
+    if (selfAllocated) *selfAllocated = false;
+    HANDLE h = GetStdHandle(STD_OUTPUT_HANDLE);
+    if (h && h != INVALID_HANDLE_VALUE) return h;
+    if (!AttachConsole(ATTACH_PARENT_PROCESS)) {
+        AllocConsole();
+        if (selfAllocated) *selfAllocated = true;
+    }
+    h = GetStdHandle(STD_OUTPUT_HANDLE);
+    if (h && h != INVALID_HANDLE_VALUE) return h;
+    return CreateFileW(L"CONOUT$", GENERIC_WRITE, FILE_SHARE_WRITE,
+        nullptr, OPEN_EXISTING, 0, nullptr);
+}
+
 // 将消息输出到控制台（支持分配/附加父控制台）
 static void PrintToConsole(const wchar_t* msg) {
-    HANDLE hCon = GetStdHandle(STD_OUTPUT_HANDLE);
-    if (hCon == INVALID_HANDLE_VALUE || hCon == nullptr) {
-        // 尝试附加父进程控制台或分配新控制台
-        if (!AttachConsole(ATTACH_PARENT_PROCESS)) {
-            AllocConsole();
-        }
-        hCon = GetStdHandle(STD_OUTPUT_HANDLE);
-    }
+    HANDLE hCon = AcquireConsoleOut();
     if (hCon && hCon != INVALID_HANDLE_VALUE) {
         WriteTextToHandle(hCon, msg);
     }
@@ -327,6 +356,14 @@ static void ShowVersionAndExit() {
         L"Windows 11 风格网络时间同步工具\n"
         L"编译时间: " __DATE__ " " __TIME__ L"\n"
         L"开源地址: https://gitee.com/ygwill/time-viewer\n";
+    if (g_launchEnv != LaunchEnv::Console) {
+        // 无控制台来源（双击/快捷方式/无法判定）：PrintToConsole 的 AllocConsole
+        // 兜底会开一个随进程立即销毁的控制台窗口，版本信息一闪而过不可读，
+        // 改用弹窗呈现（与 ReportError 的环境分流策略对齐，issue #47）
+        MessageBoxW(nullptr, versionMsg, L"TimeDisplay 版本信息",
+            MB_OK | MB_ICONINFORMATION);
+        exit(0);
+    }
     PrintToConsole(versionMsg);
     exit(0);
 }
@@ -394,14 +431,9 @@ static void ShowHelpAndExit() {
         L"===========================================================\n"
         L"\n\n\n";
 
-    // 获取控制台输出句柄
-    HANDLE hCon = GetStdHandle(STD_OUTPUT_HANDLE);
-    if (hCon == INVALID_HANDLE_VALUE || hCon == nullptr) {
-        if (!AttachConsole(ATTACH_PARENT_PROCESS)) {
-            AllocConsole();
-        }
-        hCon = GetStdHandle(STD_OUTPUT_HANDLE);
-    }
+    // 获取控制台输出句柄（AllocConsole 临时分配时记标记，末尾需等待按键，issue #47）
+    bool selfAllocated = false;
+    HANDLE hCon = AcquireConsoleOut(&selfAllocated);
 
     // 无法获取控制台句柄时退回到 OutputDebugString
     if (!hCon || hCon == INVALID_HANDLE_VALUE) {
@@ -519,6 +551,16 @@ static void ShowHelpAndExit() {
             // 下次暂停位置 = 当前行 + 用户指定的前进行数
             nextPauseLine = lineCount + advance;
         }
+    }
+
+    if (selfAllocated) {
+        // 临时分配的控制台（双击/快捷方式启动）随进程退出即销毁：
+        // 读完最后一页后等待一次按键，避免最后一页读不到（issue #47）
+        DWORD written = 0;
+        static const wchar_t endPrompt[] = L"\n--- 已到末尾，按任意键退出 ---";
+        WriteConsoleW(hCon, endPrompt,
+            (DWORD)(sizeof(endPrompt) / sizeof(wchar_t) - 1), &written, nullptr);
+        (void)WaitForInput();
     }
 
     // 恢复输入模式
@@ -1154,6 +1196,12 @@ int WINAPI wWinMain(_In_ HINSTANCE hInstance,
             g_launchEnv = LaunchEnv::Other;
         }
     }
+
+    // 探测用的 Attach→Free 会在 std 槽位残留失效的控制台句柄：
+    // 非 NULL 但不可用，会绕过后续有效性检查并让写入静默失败
+    // （--help/--version 控制台无输出的根因，issue #46）。
+    // 这里清掉死句柄；重定向的文件/管道句柄不受影响。
+    SanitizeStdHandles();
 
     int argc;
     LPWSTR* argv = CommandLineToArgvW(GetCommandLineW(), &argc);
