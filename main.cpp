@@ -24,6 +24,8 @@
 #include <new>
 #include <cstdio>
 #include <cstdlib>
+#include <cerrno>
+#include <cwchar>
 #include <sstream>
 #include <conio.h>
 #include "d2d_renderer.h"
@@ -1220,10 +1222,13 @@ int WINAPI wWinMain(_In_ HINSTANCE hInstance,
                     LocalFree(argv);
                     return 1;
                 }
-                int val = _wtoi(valStr);
-                if (val < 0 || val > 255) {
+                // wcstol + ERANGE 检测：_wtoi 对超长数字串行为未定义，
+                // 可能截断成 0 误触发"完全不可见"警告（issue #51）
+                errno = 0;
+                long val = wcstol(valStr, nullptr, 10);
+                if (errno == ERANGE || val < 0 || val > 255) {
                     wchar_t errMsg[256];
-                    StringCchPrintfW(errMsg, _countof(errMsg), L"错误: 透明度值 %d 超出有效范围，允许值为 0-255\n", val);
+                    StringCchPrintfW(errMsg, _countof(errMsg), L"错误: 透明度值 '%s' 超出有效范围，允许值为 0-255\n", valStr);
                     ReportError(errMsg);
                     LocalFree(argv);
                     return 1;
@@ -1241,8 +1246,10 @@ int WINAPI wWinMain(_In_ HINSTANCE hInstance,
                 g_transparency = val;
             }
             else if (wcscmp(argv[i], L"--font-name") == 0) {
-                // --font-name 需要后面跟字体名称参数
-                if (i + 1 >= argc) {
+                // --font-name 需要后面跟字体名称参数；
+                // 下一 token 以 '-' 开头视为缺参，避免吞掉后续选项导致
+                // "--font-name --debug" 之类误报"未找到字体 '--debug'"（issue #48）
+                if (i + 1 >= argc || argv[i + 1][0] == L'-') {
                     ReportError(L"错误: 选项 --font-name 需要一个字体族名称参数\n"
                                 L"用法示例: TimeDisplay.exe --font-name \"Arial\"\n");
                     LocalFree(argv);
@@ -1256,8 +1263,9 @@ int WINAPI wWinMain(_In_ HINSTANCE hInstance,
                 }
             }
             else if (wcscmp(argv[i], L"--font-path") == 0) {
-                // --font-path 需要后面跟字体文件路径参数
-                if (i + 1 >= argc) {
+                // --font-path 需要后面跟字体文件路径参数；
+                // 下一 token 以 '-' 开头视为缺参（同 --font-name，issue #48）
+                if (i + 1 >= argc || argv[i + 1][0] == L'-') {
                     ReportError(L"错误: 选项 --font-path 需要一个字体文件路径参数\n"
                                 L"用法示例: TimeDisplay.exe --font-path \"C:\\Windows\\Fonts\\myfont.ttf\"\n");
                     LocalFree(argv);
@@ -1299,10 +1307,14 @@ int WINAPI wWinMain(_In_ HINSTANCE hInstance,
                 g_restoreUi = true;
             }
             else if (wcscmp(argv[i], L"--restart-wait") == 0) {
-                // 崩溃自重启时等待旧实例退出，避免出现两个实例
-                if (i + 1 < argc && IsNumericString(argv[i + 1])) {
-                    g_restartWaitPid = (unsigned long)_wtoi(argv[++i]);
+                // 崩溃自重启时等待旧实例退出，避免出现两个实例。
+                // 非法值不再静默忽略，与未知参数的处理策略一致（issue #51）
+                if (i + 1 >= argc || !IsNumericString(argv[i + 1])) {
+                    ReportError(L"错误: 选项 --restart-wait 需要一个数字参数（等待退出的进程 PID）\n");
+                    LocalFree(argv);
+                    return 1;
                 }
+                g_restartWaitPid = (unsigned long)_wtoi(argv[++i]);
             }
             else {
                 // 无法识别的参数 → 报错并退出
