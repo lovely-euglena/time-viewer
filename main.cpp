@@ -326,7 +326,7 @@ static void ShowVersionAndExit() {
     const wchar_t* versionMsg =
         L"Windows 11 风格网络时间同步工具\n"
         L"编译时间: " __DATE__ " " __TIME__ L"\n"
-        L"开源地址: https://gitee.com/ygwill/time-viewer\n";
+        L"开源地址: https://git.ygwill.asia/lovely-euglena/time-viewer\n";
     PrintToConsole(versionMsg);
     exit(0);
 }
@@ -337,7 +337,7 @@ static void ShowHelpAndExit() {
         L"\n\n\n===========================================================\n"
         L"TimeDisplay 时间显示器\n"
         L"Windows 11 风格网络时间同步工具\n"
-        L"访问 https://gitee.com/ygwill/time-viewer/releases/ 获取更新\n"
+        L"访问 https://git.ygwill.asia/lovely-euglena/time-viewer/releases 获取更新\n"
         L"===========================================================\n"
         L"\n使用方法:\n"
         L"  TimeDisplay.exe [选项]\n"
@@ -389,8 +389,8 @@ static void ShowHelpAndExit() {
         L"  TimeDisplay.exe --debug                  # 输出调试日志\n"
         L"===========================================================\n"
         L"\n【项目信息】\n"
-        L"  开源地址：https://gitee.com/ygwill/time-viewer\n"
-        L"  问题反馈：请在Gitee上提交Issue\n"
+        L"  开源地址：https://git.ygwill.asia/lovely-euglena/time-viewer\n"
+        L"  问题反馈：https://git.ygwill.asia/lovely-euglena/time-viewer/issues\n"
         L"===========================================================\n"
         L"\n\n\n";
 

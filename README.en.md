@@ -65,8 +65,24 @@ msbuild TimeDisplay.sln /p:Configuration=Release /p:Platform=x64
 | `--font-name <name>` | Specify display font (name of an installed system font family) |
 | `--font-path <path>` | Load font from an external file (supports .ttf/.otf) |
 | `--debug [path]` | Output debug log (defaults to `TimeDisplay.log` next to the exe; file or directory) |
+| `--show-warning` | Force parameter-check warning dialogs (also when launched from console) |
+| `-w`, `--ignore-warning` | Suppress parameter warning dialogs when launched via shortcut / double-click |
+| `--force-gdi` | Force GDI software rendering, disable Direct2D GPU acceleration |
+| `--disable-gpu` | Same as `--force-gdi` |
+| `--disable-touch` | Disable double-click title-bar / touch double-tap fullscreen toggle |
+| `--no-auto-hide` | Disable button auto-hide, keep buttons always visible |
+| `--no-animation` | Disable fade in/out animations for button show/hide |
 | `-h`, `--help` | Show help information |
 | `-v`, `--version` | Show version information |
+
+### Exit Codes and Batch Files
+
+| Exit code | Meaning |
+|-----------|---------|
+| `0` | Normal exit, or `--help` / `--version` output finished |
+| `1` | Argument parsing error (unknown option, missing value, out-of-range number, unusable font, etc.) |
+
+Note: this is a GUI-subsystem application — **cmd batch files do not wait for it**, so `%ERRORLEVEL%` is unreliable in batch scripts; interactive cmd does wait. In PowerShell use `Start-Process -Wait` to capture the exit code.
 
 ### Examples
 

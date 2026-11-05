@@ -68,8 +68,24 @@ msbuild TimeDisplay.sln /p:Configuration=Release /p:Platform=x64
 | `--font-name <名称>` | 指定显示字体（系统中已安装的字体族名称） |
 | `--font-path <路径>` | 从外部字体文件加载字体（支持 .ttf/.otf） |
 | `--debug [路径]` | 输出调试日志（默认 exe 同目录 `TimeDisplay.log`，可指定文件或目录） |
+| `--show-warning` | 强制显示参数检查警告弹窗（命令行启动时也显示） |
+| `-w`, `--ignore-warning` | 忽略快捷方式/双击启动时的参数警告弹窗 |
+| `--force-gdi` | 强制使用 GDI 软件渲染，不启用 Direct2D GPU 加速 |
+| `--disable-gpu` | 同 `--force-gdi`，强制禁用 GPU 加速 |
+| `--disable-touch` | 禁用双击标题栏/触摸双击切换全屏功能 |
+| `--no-auto-hide` | 禁用按钮自动隐藏，按钮始终显示 |
+| `--no-animation` | 禁用按钮显示/隐藏的淡入淡出动画 |
 | `-h`, `--help` | 显示帮助信息 |
 | `-v`, `--version` | 显示版本信息 |
+
+### 退出码与批处理
+
+| 退出码 | 含义 |
+|--------|------|
+| `0` | 正常退出，或 `--help` / `--version` 输出完成 |
+| `1` | 参数解析错误（未知选项、缺参、数值越界、字体不可用等） |
+
+注意：本程序是 GUI 子系统应用，**cmd 批处理不会等待其退出**，`%ERRORLEVEL%` 取不到返回值；交互式 cmd 会正常等待。PowerShell 中需要 `Start-Process -Wait` 才能拿到退出码。
 
 ### 示例
 
