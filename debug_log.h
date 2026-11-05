@@ -18,9 +18,9 @@
 // 启用调试日志。
 // path 为空：默认 exe 同目录 TimeDisplay.log；
 // path 为目录（或尾部带斜杠）：使用该目录下的 TimeDisplay.log；
-// 指定路径不可写时自动回退到临时目录。
+// 指定路径不可写时自动回退到临时目录（fellBack 出参置 true，调用方可提示用户）。
 // 返回是否成功创建日志文件。
-bool DebugLogEnable(const wchar_t* path);
+bool DebugLogEnable(const wchar_t* path, bool* fellBack = nullptr);
 
 // 原样记录一条消息（自动去除尾部换行，不做格式化）
 void DebugLogRaw(const wchar_t* msg);

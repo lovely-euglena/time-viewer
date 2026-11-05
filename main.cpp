@@ -1165,10 +1165,15 @@ int WINAPI wWinMain(_In_ HINSTANCE hInstance,
                 if (i + 1 < argc && argv[i + 1][0] != L'-') {
                     logPath = argv[i + 1];
                 }
-                if (DebugLogEnable(logPath)) {
+                bool logFellBack = false;
+                if (DebugLogEnable(logPath, &logFellBack)) {
                     LOGI(L"命令行: %s", GetCommandLineW());
                     LOGI(L"启动环境: %s", g_launchEnv == LaunchEnv::Console ? L"控制台" :
                         (g_launchEnv == LaunchEnv::Gui ? L"快捷方式/双击" : L"其它"));
+                    if (logFellBack) {
+                        // 指定路径不可写被静默回退，用户会找不到日志——明示实际落点（issue #53）
+                        WriteToStderr(L"[TimeDisplay] 指定的日志路径不可写，已回退到临时目录 %TEMP%\\TimeDisplay.log\n");
+                    }
                 }
                 else {
                     ReportError(L"错误: 无法创建调试日志文件，日志功能不可用\n");

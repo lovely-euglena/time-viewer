@@ -44,15 +44,37 @@ namespace {
     void WriteLine(const wchar_t* level, const wchar_t* text) {
         SYSTEMTIME st;
         GetLocalTime(&st);
+
+        // 超长内容先截断并打标记（issue #53）：StringCchPrintfW 静默截断无提示；
+        // 且超长行含 4 字节 UTF-8 字符（emoji 等）时转换会超缓冲导致整行丢弃
+        wchar_t text2[1100];
+        bool truncated = false;
+        if (wcslen(text) >= _countof(text2)) {
+            wcsncpy_s(text2, text, _countof(text2) - 1);
+            text2[_countof(text2) - 1] = L'\0';
+            text = text2;
+            truncated = true;
+        }
+
         wchar_t line[1200];
         StringCchPrintfW(line, _countof(line),
-            L"[%04u-%02u-%02u %02u:%02u:%02u.%03u] %s %s\r\n",
+            L"[%04u-%02u-%02u %02u:%02u:%02u.%03u] %s %s%s\r\n",
             st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute, st.wSecond,
-            st.wMilliseconds, level, text);
+            st.wMilliseconds, level, text, truncated ? L" ...[truncated]" : L"");
 
-        char utf8[4096];
+        // 行最长 1200 wchar，全为 4 字节 UTF-8 时需 4801 字节（含结尾符）；
+        // 原 4096 缓冲下这类行转换失败被整行丢弃
+        char utf8[4801];
         int n = WideCharToMultiByte(CP_UTF8, 0, line, -1, utf8, sizeof(utf8), nullptr, nullptr);
-        if (n <= 1) return;
+        if (n <= 1) {
+            // 转换失败（防御分支）：退化为固定占位行，保留时间线不静默丢行
+            StringCchPrintfW(line, _countof(line),
+                L"[%04u-%02u-%02u %02u:%02u:%02u.%03u] %s <log line dropped: utf8 conversion failed>\r\n",
+                st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute, st.wSecond,
+                st.wMilliseconds, level);
+            n = WideCharToMultiByte(CP_UTF8, 0, line, -1, utf8, sizeof(utf8), nullptr, nullptr);
+            if (n <= 1) return;
+        }
 
         HANDLE h = CreateFileW(g_logPath.c_str(), FILE_APPEND_DATA,
             FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr,
@@ -100,7 +122,8 @@ namespace {
 
 } // anonymous namespace
 
-bool DebugLogEnable(const wchar_t* path) {
+bool DebugLogEnable(const wchar_t* path, bool* fellBack) {
+    if (fellBack) *fellBack = false;
     std::wstring p = (path && *path) ? path : GetDefaultLogPath();
 
     // 传入目录（或尾部带斜杠）时，使用目录下的默认文件名
@@ -119,7 +142,11 @@ bool DebugLogEnable(const wchar_t* path) {
         DWORD n = GetTempPathW(MAX_PATH, tmp);
         if (n > 0 && n < MAX_PATH) {
             std::wstring alt = std::wstring(tmp) + L"TimeDisplay.log";
-            if (EnsureWritable(alt)) p = alt;
+            if (EnsureWritable(alt)) {
+                p = alt;
+                // 告知调用方实际落点偏离请求路径，供上层提示用户（issue #53）
+                if (fellBack) *fellBack = true;
+            }
         }
     }
     if (!EnsureWritable(p)) return false;
