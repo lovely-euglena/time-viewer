@@ -1106,7 +1106,12 @@ static LONG WINAPI CrashHandler(EXCEPTION_POINTERS* /*ep*/) {
     }
 
     if (g_crashCount < CRASH_HARD_LIMIT) {
-        wchar_t newCmd[2048] = {};
+        // 8K 缓冲：容纳原始命令行 + 追加的恢复参数（原 2048 在长命令行场景
+        // 放弃自拉起，只能落到 WER 重启并丢失原始参数，issue #52）。
+        // 截断安全线：StringCchPrintfW 缓冲不足时返回失败，
+        // SUCCEEDED(hr) 为假 → 不自拉起 → 交由下方已注册的 WER 重启兜底，
+        // 绝不会以截断的命令行启动新实例。
+        wchar_t newCmd[8192] = {};
         HRESULT hr = StringCchPrintfW(newCmd, _countof(newCmd),
             L"%s --restored --restart-wait %lu",
             GetCommandLineW(), (unsigned long)GetCurrentProcessId());
@@ -1350,8 +1355,19 @@ int WINAPI wWinMain(_In_ HINSTANCE hInstance,
     // 注册系统级自动重启（达到硬上限后不再注册，避免无限重启）
     if (g_crashCount >= CRASH_HARD_LIMIT) {
         LOGI(L"崩溃恢复: 连续崩溃已达硬上限 %d，本次不注册自动重启", CRASH_HARD_LIMIT);
-    } else if (!RegisterApplicationRestart(L"--restored", 0)) {
-        LOGV(L"崩溃恢复: RegisterApplicationRestart 失败（继续依赖异常兜底）");
+    } else {
+        // WER 兜底重启（issue #52）：RESTART_MAX_CMD_LINE=1024，
+        // 原始命令行装得下就带上，保留 -t/--font-* 等启动参数；
+        // 装不下（超长命令行）则仅保留 --restored，UI 状态仍由 AppState 复原
+        wchar_t werCmd[RESTART_MAX_CMD_LINE] = {};
+        LPCWSTR werArg = L"--restored";
+        if (SUCCEEDED(StringCchPrintfW(werCmd, _countof(werCmd),
+            L"%s --restored", GetCommandLineW()))) {
+            werArg = werCmd;
+        }
+        if (!RegisterApplicationRestart(werArg, 0)) {
+            LOGV(L"崩溃恢复: RegisterApplicationRestart 失败（继续依赖异常兜底）");
+        }
     }
     SetUnhandledExceptionFilter(CrashHandler);
 
